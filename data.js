@@ -1,6 +1,73 @@
-// ─── 120 DAYS DATA ─────────────────────────────────────────────────────────
+// ─── REVISION SCHEDULE ──────────────────────────────────────────────────────
+// Each revision is relative to the PREVIOUS revision (or study date for R1)
+const REV_SCHEDULE = [
+  { key: 'r1', label: 'R1', desc: '+1 day',    days: 1  },
+  { key: 'r2', label: 'R2', desc: '+2 days',   days: 2  },
+  { key: 'r3', label: 'R3', desc: '+4 days',   days: 4  },
+  { key: 'r4', label: 'R4', desc: '+7 days',   days: 7  },
+  { key: 'r5', label: 'R5', desc: '+10 days',  days: 10 },
+  { key: 'r6', label: 'R6', desc: '+14 days',  days: 14 },
+  { key: 'r7', label: 'R7', desc: '+18 days',  days: 18 },
+  { key: 'r8', label: 'R8', desc: '+21 days',  days: 21 },
+];
+
+// ─── STUDY PLAN ─────────────────────────────────────────────────────────────
+const STUDY_PLAN = {
+  startDate: '2026-03-22',
+  examDate:  '2026-07-26',
+  graceDays: 5,
+  phases: [
+    {
+      id: 'phase1', label: 'Phase 1', days: [1, 49], color: '#8B5E3C',
+      desc: 'Science · Bihar Special · Ancient · Medieval · Modern History · Current Affairs Jul 2025–Apr 2026',
+      sections: ['science', 'bihar', 'ancient', 'medieval', 'modern']
+    },
+    {
+      id: 'phase2', label: 'Phase 2', days: [50, 74], color: '#5C6E4A',
+      desc: 'Polity · Geography · Current Affairs May–Jun 2026',
+      sections: ['polity']
+    },
+    {
+      id: 'phase3', label: 'Phase 3', days: [75, 90], color: '#4A5C6E',
+      desc: 'Economy · Maths/Reasoning · Current Affairs up to date',
+      sections: ['bihar', 'maths']
+    }
+  ]
+};
+
+// ─── SECTIONS META ──────────────────────────────────────────────────────────
+const SECTIONS_META = {
+  science:  { label: 'General Science',    range: 'S1–S20', color: '#7B6B52' },
+  ancient:  { label: 'Ancient India',      range: '1–20',   color: '#8B5E3C' },
+  medieval: { label: 'Medieval India',     range: '21–40',  color: '#6B5B3E' },
+  modern:   { label: 'Modern India',       range: '41–60',  color: '#5C6E4A' },
+  polity:   { label: 'Polity + Geography', range: '61–90',  color: '#4A6B5C' },
+  bihar:    { label: 'Bihar + Economics',  range: '91–110', color: '#7A5C4A' },
+  maths:    { label: 'Maths + Reasoning',  range: '111–120',color: '#5C5A7A' },
+};
+
+// ─── 120 + 20 SCIENCE DAYS DATA ─────────────────────────────────────────────
 const DAYS_DATA = [
-  // Ancient India 1-20
+  {id:'s1',  sec:'science', topic:'Matter, Sorting Materials'},
+  {id:'s2',  sec:'science', topic:'Light, Shadows, Electricity Basics'},
+  {id:'s3',  sec:'science', topic:'Living / Non-Living, Body Movement'},
+  {id:'s4',  sec:'science', topic:'Food: Sources, Components'},
+  {id:'s5',  sec:'science', topic:'Heat, Acids & Bases'},
+  {id:'s6',  sec:'science', topic:'Light, Electric Current'},
+  {id:'s7',  sec:'science', topic:'Weather, Wind, Water'},
+  {id:'s8',  sec:'science', topic:'Crop Production, Microorganisms'},
+  {id:'s9',  sec:'science', topic:'Coal, Petroleum, Combustion'},
+  {id:'s10', sec:'science', topic:'Cell Structure, Reproduction'},
+  {id:'s11', sec:'science', topic:'Force, Friction, Sound'},
+  {id:'s12', sec:'science', topic:'Matter — States, Changes'},
+  {id:'s13', sec:'science', topic:'Atoms, Molecules, Structure'},
+  {id:'s14', sec:'science', topic:'Motion, Force, Laws'},
+  {id:'s15', sec:'science', topic:'Work, Energy, Sound'},
+  {id:'s16', sec:'science', topic:'Life Processes, Control'},
+  {id:'s17', sec:'science', topic:'Heredity, Evolution'},
+  {id:'s18', sec:'science', topic:'Light, Electricity, Magnetic'},
+  {id:'s19', sec:'science', topic:'Carbon Compounds, Metals'},
+  {id:'s20', sec:'science', topic:'Test Science NCERT'},
   {id:1,  sec:'ancient', topic:'Sources of History + Prehistoric Period'},
   {id:2,  sec:'ancient', topic:'Palaeolithic and Mesolithic Age'},
   {id:3,  sec:'ancient', topic:'Neolithic and Chalcolithic Age'},
@@ -20,8 +87,7 @@ const DAYS_DATA = [
   {id:17, sec:'ancient', topic:'South India: Cholas and Pallavas'},
   {id:18, sec:'ancient', topic:'Ancient Society and Economy'},
   {id:19, sec:'ancient', topic:'Revision + Map Work'},
-  {id:20, sec:'ancient', topic:'Test + PYQs - Ancient History'},
-  // Medieval 21-40
+  {id:20, sec:'ancient', topic:'Test + PYQs — Ancient History'},
   {id:21, sec:'medieval', topic:'Early Medieval Kingdoms'},
   {id:22, sec:'medieval', topic:'Rajputs: Rise and Culture'},
   {id:23, sec:'medieval', topic:'Arab and Turkish Invasions'},
@@ -42,7 +108,6 @@ const DAYS_DATA = [
   {id:38, sec:'medieval', topic:'Revision'},
   {id:39, sec:'medieval', topic:'Map Work + PYQs'},
   {id:40, sec:'medieval', topic:'Test: Medieval History'},
-  // Modern 41-60
   {id:41, sec:'modern', topic:'Arrival of European Companies'},
   {id:42, sec:'modern', topic:'British Conquest: 1757–1764'},
   {id:43, sec:'modern', topic:'Company Rule'},
@@ -63,7 +128,6 @@ const DAYS_DATA = [
   {id:58, sec:'modern', topic:'Timeline + Revision'},
   {id:59, sec:'modern', topic:'PYQs + Map Work'},
   {id:60, sec:'modern', topic:'Grand Test'},
-  // Polity+Geo 61-90
   {id:61, sec:'polity', topic:'Constitution: Historical Background'},
   {id:62, sec:'polity', topic:'Features of the Constitution'},
   {id:63, sec:'polity', topic:'Making of the Constitution'},
@@ -94,7 +158,6 @@ const DAYS_DATA = [
   {id:88, sec:'polity', topic:'Constitutional Amendments'},
   {id:89, sec:'polity', topic:'Emergency Provisions'},
   {id:90, sec:'polity', topic:'Full Polity Test + Revision'},
-  // Bihar+Eco 91-110
   {id:91,  sec:'bihar', topic:'Bihar Ancient History + Microeconomics'},
   {id:92,  sec:'bihar', topic:'Bihar Medieval History + Microeconomics'},
   {id:93,  sec:'bihar', topic:'Bihar Modern History + Demand and Supply'},
@@ -115,7 +178,6 @@ const DAYS_DATA = [
   {id:108, sec:'bihar', topic:'Bihar PYQs + Economics PYQs'},
   {id:109, sec:'bihar', topic:'Bihar Revision + Economics Revision'},
   {id:110, sec:'bihar', topic:'Bihar Test + Economics Test'},
-  // Maths 111-120
   {id:111, sec:'maths', topic:'Bihar History (Rapid) + Number System'},
   {id:112, sec:'maths', topic:'Bihar Geography (Rapid) + Percentage'},
   {id:113, sec:'maths', topic:'Bihar Economy (Rapid) + Ratio and Proportion'},
@@ -126,23 +188,4 @@ const DAYS_DATA = [
   {id:118, sec:'maths', topic:'Bihar PYQs + Reasoning: Basics'},
   {id:119, sec:'maths', topic:'Bihar Full Revision + Reasoning: Practice'},
   {id:120, sec:'maths', topic:'Bihar Mock Test + Maths & Reasoning Mock'},
-];
-
-const SECTIONS_META = {
-  ancient:  { label: 'Ancient India',        range: '1–20',   color: '#ff9500' },
-  medieval: { label: 'Medieval India',        range: '21–40',  color: '#af52de' },
-  modern:   { label: 'Modern India',          range: '41–60',  color: '#007aff' },
-  polity:   { label: 'Polity + Geography',    range: '61–90',  color: '#34c759' },
-  bihar:    { label: 'Bihar + Economics',     range: '91–110', color: '#ff3b30' },
-  maths:    { label: 'Maths + Reasoning',     range: '111–120',color: '#5ac8fa' },
-};
-
-// Revision schedule: days after initial study
-const REV_SCHEDULE = [
-  { key: 'r1', label: 'R1', desc: '+1 day',   days: 1  },
-  { key: 'r2', label: 'R2', desc: '+3 days',  days: 3  },
-  { key: 'r3', label: 'R3', desc: '+1 week',  days: 7  },
-  { key: 'r4', label: 'R4', desc: '+2 weeks', days: 14 },
-  { key: 'r5', label: 'R5', desc: '+1 month', days: 30 },
-  { key: 'r6', label: 'R6', desc: '+75 days', days: 75 },
 ];
