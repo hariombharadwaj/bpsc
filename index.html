@@ -67,10 +67,14 @@
     <!-- Main -->
     <main id="main">
       <header id="topbar">
-        <div class="topbar-left">
-          <div class="page-title" id="pageTitle">Today</div>
-          <div class="page-sub" id="pageSub"></div>
+                <div class="topbar-left" style="display:flex; align-items:center;">
+          <button class="menu-btn" onclick="App.toggleSidebar()">☰</button>
+          <div>
+            <div class="page-title" id="pageTitle">Today</div>
+            <div class="page-sub" id="pageSub"></div>
+          </div>
         </div>
+
         <div class="topbar-right">
           <div class="exam-chip" id="examCountdown"></div>
           <div class="today-date" id="dateDisplay"></div>
