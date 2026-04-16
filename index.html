@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="BPSC Tracker" />
+  <meta name="theme-color" content="#ffffff" />
+  <title>BPSC · Revision Tracker</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="app-logo">
+          <span class="logo-icon">◈</span>
+          <span class="logo-text">BPSC</span>
+        </div>
+        <div class="logo-sub">Prelims 2026</div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-view="today" onclick="App.setView('today', this)">
+          <span class="nav-icon">◉</span>
+          <span>Today</span>
+          <span class="nav-badge" id="badge-today"></span>
+        </button>
+        <button class="nav-item" data-view="all" onclick="App.setView('all', this)">
+          <span class="nav-icon">▦</span>
+          <span>All Days</span>
+        </button>
+        <button class="nav-item" data-view="stats" onclick="App.setView('stats', this)">
+          <span class="nav-icon">◈</span>
+          <span>Statistics</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-sections">
+        <div class="section-label">SECTIONS</div>
+        <button class="sec-item" data-sec="all" onclick="App.filterSection('all', this)">All Topics</button>
+        <button class="sec-item active" data-sec="ancient" onclick="App.filterSection('ancient', this)">Ancient India</button>
+        <button class="sec-item" data-sec="medieval" onclick="App.filterSection('medieval', this)">Medieval India</button>
+        <button class="sec-item" data-sec="modern" onclick="App.filterSection('modern', this)">Modern India</button>
+        <button class="sec-item" data-sec="polity" onclick="App.filterSection('polity', this)">Polity + Geo</button>
+        <button class="sec-item" data-sec="bihar" onclick="App.filterSection('bihar', this)">Bihar + Eco</button>
+        <button class="sec-item" data-sec="maths" onclick="App.filterSection('maths', this)">Maths + Reasoning</button>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="undo-redo">
+          <button class="ur-btn" id="undoBtn" onclick="App.undo()" title="Undo">↩ Undo</button>
+          <button class="ur-btn" id="redoBtn" onclick="App.redo()" title="Redo">↪ Redo</button>
+        </div>
+        <button class="export-btn" onclick="App.exportData()">⬇ Export JSON</button>
+        <label class="export-btn import-lbl">
+          ⬆ Import JSON
+          <input type="file" accept=".json" onchange="App.importData(event)" style="display:none" />
+        </label>
+        <div class="version-tag">v1.0 · 120 Days</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+      <header id="topbar">
+        <div class="topbar-left">
+          <div class="page-title" id="pageTitle">Today</div>
+          <div class="page-sub" id="pageSub"></div>
+        </div>
+        <div class="topbar-right">
+          <div class="today-date" id="dateDisplay"></div>
+          <div class="streak-chip" id="streakChip">🔥 0</div>
+        </div>
+      </header>
+
+      <div id="viewToday" class="view active"></div>
+      <div id="viewAll" class="view"></div>
+      <div id="viewStats" class="view"></div>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Modal -->
+  <div id="modal-overlay" onclick="App.closeModal()">
+    <div id="modal-box" onclick="e=>e.stopPropagation()">
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
