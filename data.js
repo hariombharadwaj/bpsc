@@ -1,14 +1,16 @@
 
-// ─── REVISION SCHEDULE ──────────────────────────────────────────────────────
-// User's actual schedule: CHAINED from the previous revision date
+// ─── REVISION SCHEDULE (CHAINED & LOCKED) ──────────────────────────────────
 const REV_SCHEDULE = [
-  { key: 'r1', label: 'R1', desc: '+1 Day',   days: 1  },  // +1 from Study
-  { key: 'r2', label: 'R2', desc: '+2 Days',  days: 2  },  // +2 from R1
-  { key: 'r3', label: 'R3', desc: '+4 Days',  days: 4  },  // +4 from R2
-  { key: 'r4', label: 'R4', desc: '+8 Days',  days: 8  },  // +8 from R3
-  { key: 'r5', label: 'R5', desc: '+15 Days', days: 15 },  // +15 from R4
-  { key: 'r6', label: 'R6', desc: '+45 Days', days: 45 },  // +45 from R5
+  { key: 'r1', label: 'R1', desc: '+1 Day',  gap: 1 },
+  { key: 'r2', label: 'R2', desc: '+2 Days', gap: 2 },
+  { key: 'r3', label: 'R3', desc: '+4 Days', gap: 4 },
+  { key: 'r4', label: 'R4', desc: '+7 Days', gap: 7 },
+  { key: 'r5', label: 'R5', desc: '+10 Days', gap: 10 },
+  { key: 'r6', label: 'R6', desc: '+14 Days', gap: 14 },
+  { key: 'r7', label: 'R7', desc: '+18 Days', gap: 18 },
+  { key: 'r8', label: 'R8', desc: '+21 Days', gap: 21 },
 ];
+
 
 // ─── STUDY PLAN ─────────────────────────────────────────────────────────────
 const STUDY_PLAN = {
