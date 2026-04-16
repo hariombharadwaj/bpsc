@@ -167,28 +167,48 @@ const App = (() => {
 
   // ── REVISION LOGIC ────────────────────────────────────────────────────────
   // All revisions computed FROM study date (absolute, not chained)
+    // ── REVISION LOGIC ────────────────────────────────────────────────────────
   function getEffectiveSchedule() {
     return CONFIG.revSchedule || REV_SCHEDULE;
   }
 
+  // CHAINED TARGET: Base date is previous revision's completion date
   function getRevTarget(dayId, revKey, st) {
     if (!st) st = ensureDayState(dayId);
     if (!st.studyDate) return null;
+
     const sched = getEffectiveSchedule();
-    const r = sched.find(x => x.key === revKey);
-    if (!r) return null;
-    return addDays(st.studyDate, r.days);
+    const rIndex = sched.findIndex(x => x.key === revKey);
+    if (rIndex === -1) return null;
+    
+    let baseDate = null;
+    if (rIndex === 0) {
+      baseDate = st.studyDate; // R1 is based on Initial Read
+    } else {
+      const prevKey = sched[rIndex - 1].key;
+      baseDate = st.revisions[prevKey]; // R2+ based on previous revision date
+    }
+
+    // If the previous step is not completed, this revision has no target (it is locked)
+    if (!baseDate) return null; 
+
+    const r = sched[rIndex];
+    const gap = r.gap !== undefined ? r.gap : (r.days || 1); // Fallback for backwards compatibility
+    return addDays(baseDate, gap);
   }
 
   function getRevStatus(dayId, revKey, st) {
     if (!st) st = ensureDayState(dayId);
     if (st.revisions[revKey]) return 'done';
+    
     const target = getRevTarget(dayId, revKey, st);
-    if (!target) return 'no-study';
+    if (!target) return 'locked'; // NEW: Strictly locked if previous step isn't done
+    
     if (isToday(target)) return 'due-today';
     if (isPast(target))  return 'overdue';
     return 'upcoming';
   }
+
 
   function isDayActionable(dayId) {
     const st = ensureDayState(dayId);
