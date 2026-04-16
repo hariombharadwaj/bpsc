@@ -1,4 +1,4 @@
-// ─── BPSC TRACKER v3 ────────────────────────────────────────────────────────
+// ─── BPSC TRACKER v3 (Dynamic Phase & Analytics Edition) ────────────────────
 const App = (() => {
   const DB_NAME = 'bpsc_tracker_v3';
   const DB_VER  = 1;
@@ -6,7 +6,7 @@ const App = (() => {
   const KEY     = 'main';
 
   let db = null;
-  let STATE = {};     // { [dayId]: { studyDate, revisions:{r1..r8}, extraTopics:[], notes, hidden } }
+  let STATE = {};     
   let CONFIG = buildDefaultConfig();
   let HISTORY = [];
   let FUTURE  = [];
@@ -16,7 +16,8 @@ const App = (() => {
 
   function buildDefaultConfig() {
     return {
-      revSchedule: REV_SCHEDULE.map(r => ({ ...r })),
+      revSchedule: typeof REV_SCHEDULE !== 'undefined' ? REV_SCHEDULE.map(r => ({ ...r })) : [],
+      phases: typeof STUDY_PLAN !== 'undefined' && STUDY_PLAN.phases ? STUDY_PLAN.phases.map(p => ({ ...p })) : []
     };
   }
 
@@ -26,6 +27,7 @@ const App = (() => {
     const saved = await loadFromDB();
     STATE  = (saved && saved.state)  ? saved.state  : buildFreshState();
     CONFIG = (saved && saved.config) ? { ...buildDefaultConfig(), ...saved.config } : buildDefaultConfig();
+    
     // Restore custom topics from saved state
     if (saved && saved.customTopics) {
       saved.customTopics.forEach(ct => {
@@ -38,9 +40,18 @@ const App = (() => {
     if (saved && saved.idCounters) {
       Object.assign(SECTION_ID_COUNTERS, saved.idCounters);
     }
+    
     renderAll();
     updateUndoRedoBtns();
-    setInterval(() => { TODAY = new Date(); TODAY.setHours(0,0,0,0); renderAll(); }, 60000);
+    
+    // Refresh at midnight without requiring app restart
+    setInterval(() => { 
+      const newToday = new Date(); newToday.setHours(0,0,0,0);
+      if (newToday.getTime() !== TODAY.getTime()) {
+        TODAY = newToday; 
+        renderAll(); 
+      }
+    }, 60000);
   }
 
   function buildFreshState() {
@@ -48,17 +59,13 @@ const App = (() => {
     DAYS_DATA.forEach(d => {
       s[d.id] = { studyDate: null, revisions: initRevs(), extraTopics: [], notes: '' };
     });
-    // Pre-loaded data
-    [8,9,10,11,12].forEach(id => { s[id].studyDate = '2026-04-07'; });
-    [13,14,15,16,17].forEach(id => { s[id].studyDate = '2026-04-15'; });
-    [8,9].forEach(id => { s[id].revisions.r1 = '2026-04-14'; });
-    s[22].studyDate = '2026-04-14';
     return s;
   }
 
   function initRevs() {
     const r = {};
-    REV_SCHEDULE.forEach(rev => r[rev.key] = null);
+    const sched = CONFIG.revSchedule || REV_SCHEDULE;
+    sched.forEach(rev => r[rev.key] = null);
     return r;
   }
 
@@ -69,14 +76,15 @@ const App = (() => {
     if (!STATE[dayId].extraTopics) STATE[dayId].extraTopics = [];
     if (!STATE[dayId].notes) STATE[dayId].notes = '';
     if (!STATE[dayId].revisions) STATE[dayId].revisions = initRevs();
-    // Ensure all rev keys exist
-    REV_SCHEDULE.forEach(r => {
+    
+    // Ensure all revision keys exist to prevent undefined errors
+    getEffectiveSchedule().forEach(r => {
       if (STATE[dayId].revisions[r.key] === undefined) STATE[dayId].revisions[r.key] = null;
     });
     return STATE[dayId];
   }
 
-  // ── INDEXEDDB ────────────────────────────────────────────────────────────
+  // ── INDEXEDDB (Offline Storage) ─────────────────────────────────────────
   function openDB() {
     return new Promise((res, rej) => {
       const req = indexedDB.open(DB_NAME, DB_VER);
@@ -103,14 +111,14 @@ const App = (() => {
       state: STATE,
       config: CONFIG,
       customTopics,
-      idCounters: SECTION_ID_COUNTERS,
+      idCounters: typeof SECTION_ID_COUNTERS !== 'undefined' ? SECTION_ID_COUNTERS : {},
     });
     const tx = db.transaction(STORE, 'readwrite');
     tx.objectStore(STORE).put(payload, KEY);
     try { localStorage.setItem('bpsc_v3_backup', JSON.stringify(payload)); } catch(_){}
   }
 
-  // ── UNDO / REDO ──────────────────────────────────────────────────────────
+  // ── UNDO / REDO ─────────────────────────────────────────────────────────
   function snapshot() {
     HISTORY.push(deepClone({ state: STATE, config: CONFIG }));
     if (HISTORY.length > 50) HISTORY.shift();
@@ -145,7 +153,7 @@ const App = (() => {
     });
   }
 
-  // ── DATE HELPERS ─────────────────────────────────────────────────────────
+  // ── DATE HELPERS ────────────────────────────────────────────────────────
   function fmtISO(d) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
@@ -165,12 +173,11 @@ const App = (() => {
   function isPast(iso)  { return iso < fmtISO(TODAY); }
   function todayISO()   { return fmtISO(TODAY); }
 
-  // ── REVISION LOGIC ────────────────────────────────────────────────────────
+  // ── DYNAMIC REVISION LOGIC (Chained & Locked) ───────────────────────────
   function getEffectiveSchedule() {
     return CONFIG.revSchedule || REV_SCHEDULE;
   }
 
-  // CHAINED TARGET: Base date is previous revision's completion date
   function getRevTarget(dayId, revKey, st) {
     if (!st) st = ensureDayState(dayId);
     if (!st.studyDate) return null;
@@ -181,17 +188,17 @@ const App = (() => {
     
     let baseDate = null;
     if (rIndex === 0) {
-      baseDate = st.studyDate; // R1 is based on Initial Read
+      baseDate = st.studyDate; // R1 relies on Initial Read
     } else {
       const prevKey = sched[rIndex - 1].key;
-      baseDate = st.revisions[prevKey]; // R2+ based on previous revision date
+      baseDate = st.revisions[prevKey]; // R2+ relies on previous revision
     }
 
-    // If the previous step is not completed, this revision has no target (it is locked)
+    // Strictly locked if previous step isn't done
     if (!baseDate) return null; 
 
     const r = sched[rIndex];
-    const gap = r.gap !== undefined ? r.gap : (r.days || 1); // Fallback for backwards compatibility
+    const gap = r.gap !== undefined ? r.gap : (r.days || 1);
     return addDays(baseDate, gap);
   }
 
@@ -200,13 +207,12 @@ const App = (() => {
     if (st.revisions[revKey]) return 'done';
     
     const target = getRevTarget(dayId, revKey, st);
-    if (!target) return 'locked'; // NEW: Strictly locked if previous step isn't done
+    if (!target) return 'locked'; 
     
     if (isToday(target)) return 'due-today';
     if (isPast(target))  return 'overdue';
     return 'upcoming';
   }
-
 
   function isDayActionable(dayId) {
     const st = ensureDayState(dayId);
@@ -216,7 +222,7 @@ const App = (() => {
     });
   }
 
-  // ── PLAN HELPERS ──────────────────────────────────────────────────────────
+  // ── DYNAMIC PLAN & PHASE LOGIC ──────────────────────────────────────────
   function getPlanDay() {
     const start = new Date(STUDY_PLAN.startDate);
     return Math.max(1, Math.floor((TODAY - start) / 86400000) + 1);
@@ -228,38 +234,25 @@ const App = (() => {
     return fmtISO(start);
   }
 
+  function getActivePhases() {
+    return CONFIG.phases && CONFIG.phases.length > 0 ? CONFIG.phases : STUDY_PLAN.phases;
+  }
+
   function getCurrentPhase() {
     const pd = getPlanDay();
-    return STUDY_PLAN.phases.find(p => pd >= p.days[0] && pd <= p.days[1]) || STUDY_PLAN.phases[STUDY_PLAN.phases.length-1];
+    const phases = getActivePhases();
+    return phases.find(p => pd >= p.days[0] && pd <= p.days[1]) || phases[phases.length-1];
   }
 
   function getDaysToExam() {
     return daysDiff(todayISO(), STUDY_PLAN.examDate);
   }
 
-  // Phase-aware backlog: only topics where planDay has passed and not started
-  function getPhaseBacklog() {
-    const planDay = getPlanDay();
-    const result = [];
-
-    DAYS_DATA.forEach(d => {
-      if (!d.planDay) return; // science days have no planDay
-      if (ensureDayState(d.id).hidden) return;
-      if (d.planDay > planDay) return; // not yet due
-      const st = ensureDayState(d.id);
-      if (!st.studyDate) {
-        result.push(d);
-      }
-    });
-
-    return result;
-  }
-
   function getBacklogData() {
     const planDay = getPlanDay();
-    const overdueTopics = []; // planDay passed, not started
-    const pendingRevisions = []; // studied but revisions overdue
-    const inProgress = []; // in-progress revs
+    const overdueTopics = []; 
+    const pendingRevisions = []; 
+    const inProgress = []; 
 
     DAYS_DATA.forEach(d => {
       if (ensureDayState(d.id).hidden) return;
@@ -267,22 +260,24 @@ const App = (() => {
       const sched = getEffectiveSchedule();
       const revsDone = sched.filter(r => st.revisions[r.key]).length;
 
+      // Unstarted Topics
       if (!st.studyDate) {
         if (d.planDay && d.planDay <= planDay) {
           overdueTopics.push(d);
         }
       } else {
+        // Pending/Overdue Revisions
         const overdueRevs = sched.filter(r => getRevStatus(d.id, r.key, st) === 'overdue').length;
         if (overdueRevs > 0) pendingRevisions.push({ day: d, overdueRevs, revsDone });
         else if (revsDone < sched.length) inProgress.push({ day: d, revsDone });
       }
     });
 
-    // Phase progress
+    // Dynamic Phase progress calculation (based entirely on planDay)
     const phase = getCurrentPhase();
     let phaseProgress = null;
     if (phase) {
-      const relevantDays = DAYS_DATA.filter(d => phase.sections.includes(d.sec) && d.planDay);
+      const relevantDays = DAYS_DATA.filter(d => d.planDay >= phase.days[0] && d.planDay <= phase.days[1]);
       const expectedCount = relevantDays.filter(d => d.planDay <= planDay).length;
       const studiedCount = relevantDays.filter(d => ensureDayState(d.id).studyDate).length;
       const behind = Math.max(0, expectedCount - studiedCount);
@@ -309,7 +304,11 @@ const App = (() => {
     return streak;
   }
 
-  // ── ACTIONS ──────────────────────────────────────────────────────────────
+  // ── UI ACTIONS ──────────────────────────────────────────────────────────
+  function toggleSidebar() {
+    document.body.classList.toggle('sidebar-closed');
+  }
+
   function markStudied(dayId, dateISO) {
     snapshot();
     ensureDayState(dayId).studyDate = dateISO;
@@ -342,7 +341,7 @@ const App = (() => {
     saveToDB(); renderAll(); toast(`${revKey.toUpperCase()} →+1d`);
   }
 
-  // ── VIEWS ────────────────────────────────────────────────────────────────
+  // ── ROUTING & VIEWS ─────────────────────────────────────────────────────
   function setView(v, btn) {
     currentView = v;
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -355,8 +354,10 @@ const App = (() => {
     const vid = 'view' + v.charAt(0).toUpperCase() + v.slice(1);
     const vEl = document.getElementById(vid);
     if (vEl) vEl.classList.add('active');
+    
     const titles = { today:'Today', all:'All Days', stats:'Statistics', settings:'Settings', backlog:'Backlog' };
     document.getElementById('pageTitle').textContent = titles[v] || v;
+    
     renderCurrentView();
     updatePageSub();
   }
@@ -428,7 +429,7 @@ const App = (() => {
     }
   }
 
-  // ── TODAY VIEW ───────────────────────────────────────────────────────────
+  // ── TODAY VIEW & HERO CARDS ─────────────────────────────────────────────
   function renderTodayView() {
     const el = document.getElementById('viewToday');
     if (!el) return;
@@ -436,7 +437,6 @@ const App = (() => {
     const studied = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length;
     const totalRevDone = DAYS_DATA.reduce((acc,d) =>
       acc + getEffectiveSchedule().filter(r => ensureDayState(d.id).revisions[r.key]).length, 0);
-    const dte = getDaysToExam();
     const planDay = getPlanDay();
     const phase = getCurrentPhase();
 
@@ -454,6 +454,9 @@ const App = (() => {
 
     const tISO = todayISO();
     const studiedToday = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate === tISO);
+    
+    // Dynamic Phase Calculation (Days left in current phase block)
+    const phaseDaysLeft = phase ? Math.max(0, phase.days[1] - planDay) : 0;
 
     const phaseHtml = phase ? `
       <div class="plan-bar">
@@ -466,21 +469,21 @@ const App = (() => {
     el.innerHTML = `
       ${phaseHtml}
       <div class="today-hero">
-        <div class="hero-card accent">
+        <div class="hero-card accent" onclick="App.showAnalysisModal('due')">
           <div class="hero-num">${dueItems.length}</div>
           <div class="hero-label">Due Today</div>
         </div>
-        <div class="hero-card">
+        <div class="hero-card" onclick="App.showAnalysisModal('studied')">
           <div class="hero-num">${studied}</div>
           <div class="hero-label">Studied</div>
         </div>
-        <div class="hero-card">
+        <div class="hero-card" onclick="App.showAnalysisModal('revisions')">
           <div class="hero-num">${totalRevDone}</div>
           <div class="hero-label">Revisions</div>
         </div>
-        <div class="hero-card">
-          <div class="hero-num">${dte > 0 ? dte : '!'}</div>
-          <div class="hero-label">Days Left</div>
+        <div class="hero-card" onclick="App.showAnalysisModal('phase')">
+          <div class="hero-num">${phaseDaysLeft}</div>
+          <div class="hero-label">Phase Days Left</div>
         </div>
       </div>
 
@@ -500,7 +503,7 @@ const App = (() => {
           ${studiedToday.map(day => `
             <div class="rev-due-card completed">
               <div class="rdc-day">${formatDayId(day.id)}</div>
-              <div class="rdc-topic" onclick="App.openTopicDetail('${day.id}')">${day.topic}<small>${SECTIONS_META[day.sec].label}</small></div>
+              <div class="rdc-topic" onclick="App.openTopicDetail('${day.id}')">${day.topic}<small>${SECTIONS_META && SECTIONS_META[day.sec] ? SECTIONS_META[day.sec].label : ''}</small></div>
               <div class="rdc-rev-label">READ</div>
               <div class="rdc-check done" onclick="App.promptUnmarkStudy('${day.id}')">✓</div>
             </div>
@@ -516,13 +519,14 @@ const App = (() => {
     const isDone = !!st.revisions[revKey];
     const target = getRevTarget(day.id, revKey, st);
     const overdueDays = status === 'overdue' ? daysDiff(target, todayISO()) : 0;
+    const sectionName = SECTIONS_META && SECTIONS_META[day.sec] ? SECTIONS_META[day.sec].label : 'General';
 
     return `
       <div class="rev-due-card ${isDone ? 'completed' : status === 'overdue' ? 'overdue' : ''}">
         <div class="rdc-day">${formatDayId(day.id)}</div>
         <div class="rdc-topic" onclick="App.openTopicDetail('${day.id}')">
           ${day.topic}
-          <small>${SECTIONS_META[day.sec].label} · Target: ${fmtDisplay(target)}${status === 'overdue' ? ` <span class="overdue-tag">${overdueDays}d late</span>` : ''}</small>
+          <small>${sectionName} · Target: ${fmtDisplay(target)}${status === 'overdue' ? ` <span class="overdue-tag">${overdueDays}d late</span>` : ''}</small>
         </div>
         <div class="rdc-actions">
           <button class="rdc-snooze" onclick="App.scheduleNextDay('${day.id}','${revKey}')" title="Schedule for tomorrow">→+1</button>
@@ -535,12 +539,103 @@ const App = (() => {
 
   function formatDayId(id) {
     if (typeof id === 'string' && id.startsWith('s')) return 'S' + id.slice(1).padStart(2,'0');
-    if (typeof id === 'string' && id.startsWith('c_')) { const day = DAYS_DATA.find(d => String(d.id) === String(id)); if (day && day.seqNum) return 'D' + String(day.seqNum).padStart(3,'0'); 
-      // custom topic: show section prefix + number
+    if (typeof id === 'string' && id.startsWith('c_')) { 
+      const day = DAYS_DATA.find(d => String(d.id) === String(id)); 
+      if (day && day.seqNum) return 'D' + String(day.seqNum).padStart(3,'0'); 
       const parts = id.split('_');
       return parts[1].slice(0,3).toUpperCase() + (parts[2] || '').slice(-4);
     }
     return 'D' + String(id).padStart(3,'0');
+  }
+
+  // ── ANALYTICS ENGINE (Decision Making) ──────────────────────────────────
+  function showAnalysisModal(type) {
+    const planDay = getPlanDay();
+    const phase = getCurrentPhase();
+    const bd = getBacklogData(); 
+    
+    let title = '';
+    let html = '';
+    let insight = '';
+
+    if (type === 'due') {
+      const dueCount = DAYS_DATA.filter(d => isDayActionable(d.id)).length;
+      const doneTodayCount = DAYS_DATA.filter(d => {
+        const st = ensureDayState(d.id);
+        return st.studyDate === todayISO() || getEffectiveSchedule().some(r => st.revisions[r.key] === todayISO());
+      }).length;
+
+      title = 'Daily Action Analysis';
+      html = `
+        <div class="analysis-stat"><span>Pending Revisions Today:</span> <strong>${dueCount}</strong></div>
+        <div class="analysis-stat"><span>Total Tasks Completed Today:</span> <strong>${doneTodayCount}</strong></div>
+      `;
+      insight = dueCount > 0 
+        ? "🎯 OPTIMAL DECISION: Focus strictly on clearing today's pending revisions before reading any new topics. Stop the memory decay first."
+        : "✅ OPTIMAL DECISION: You are fully caught up for today. You may safely tackle new initial reads or review custom sub-topics.";
+    } 
+    else if (type === 'studied') {
+      const totalTopics = DAYS_DATA.length;
+      const studied = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length;
+      const notStarted = totalTopics - studied;
+      const pct = Math.round((studied/totalTopics)*100);
+
+      title = 'Overall Study Coverage';
+      html = `
+        <div class="analysis-stat"><span>Total Topics Read:</span> <strong>${studied} / ${totalTopics}</strong></div>
+        <div class="analysis-stat"><span>Syllabus Unseen (Not Started):</span> <strong>${notStarted}</strong></div>
+        <div class="analysis-stat"><span>Overall Coverage:</span> <strong>${pct}%</strong></div>
+      `;
+      insight = bd.overdueTopics.length > 0 
+        ? `🎯 OPTIMAL DECISION: You have ${bd.overdueTopics.length} initial reads pending from past days. Halt forward progression and clear this backlog immediately.`
+        : `✅ OPTIMAL DECISION: Initial reads are pacing well. Keep mapping new reads tightly to your Phase schedule.`;
+    }
+    else if (type === 'revisions') {
+      const sched = getEffectiveSchedule();
+      const totalRevDone = DAYS_DATA.reduce((acc,d) => acc + sched.filter(r => ensureDayState(d.id).revisions[r.key]).length, 0);
+      const totalOverdue = bd.pendingRevisions.length;
+      
+      title = 'Revision Health Check';
+      html = `
+        <div class="analysis-stat"><span>Total Revisions Logged:</span> <strong>${totalRevDone}</strong></div>
+        <div class="analysis-stat"><span>Topics w/ Overdue Revisions:</span> <strong style="color:var(--red)">${totalOverdue}</strong></div>
+      `;
+      insight = totalOverdue > 0 
+        ? `🎯 OPTIMAL DECISION: ${totalOverdue} topics are leaking from your memory network. Switch to the Backlog view and clear these red alerts immediately.`
+        : `✅ OPTIMAL DECISION: Your spaced repetition engine is flawlessly oiled. Memory retention is optimal.`;
+    }
+    else if (type === 'phase') {
+      const phaseDaysLeft = phase ? Math.max(0, phase.days[1] - planDay) : 0;
+      let requiredPace = 0;
+      
+      if (phase && bd.phaseProgress) {
+        const topicsLeft = bd.phaseProgress.total - bd.phaseProgress.studiedCount;
+        requiredPace = phaseDaysLeft > 0 ? (topicsLeft / phaseDaysLeft).toFixed(1) : topicsLeft;
+        
+        title = `${phase.label} Trajectory`;
+        html = `
+          <div class="analysis-stat"><span>Phase Boundary:</span> <strong>Day ${phase.days[0]} – ${phase.days[1]}</strong></div>
+          <div class="analysis-stat"><span>Unread Topics in Phase:</span> <strong>${topicsLeft}</strong></div>
+          <div class="analysis-stat"><span>Days Remaining:</span> <strong>${phaseDaysLeft}</strong></div>
+          <div class="analysis-stat"><span>Required Pace to Finish:</span> <strong>${requiredPace} topics / day</strong></div>
+        `;
+        insight = requiredPace > 2 
+          ? "🎯 OPTIMAL DECISION: You are falling behind the phase schedule. Increase your daily initial read volume slightly to catch up."
+          : "✅ OPTIMAL DECISION: You are moving at a highly sustainable pace. Stick strictly to the plan.";
+      }
+    }
+
+    const mc = document.getElementById('modal-content');
+    mc.innerHTML = `
+      <div class="modal-title">${title}</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:16px;text-transform:uppercase;letter-spacing:1px">Decision Analytics</div>
+      <div>${html}</div>
+      <div class="analysis-insight">${insight}</div>
+      <div class="modal-btn-row" style="margin-top:20px">
+        <button class="btn-primary" onclick="App.closeModal()">Got it</button>
+      </div>
+    `;
+    document.getElementById('modal-overlay').classList.add('open');
   }
 
   // ── ALL DAYS VIEW ────────────────────────────────────────────────────────
@@ -551,6 +646,7 @@ const App = (() => {
     let html = '';
 
     sections.forEach(sec => {
+      if (!SECTIONS_META[sec]) return;
       const meta = SECTIONS_META[sec];
       const days = DAYS_DATA.filter(d => d.sec === sec && !ensureDayState(d.id).hidden);
       const studiedCount = days.filter(d => ensureDayState(d.id).studyDate).length;
@@ -677,13 +773,12 @@ const App = (() => {
   }
 
   // ── TOPIC DETAIL MODAL ───────────────────────────────────────────────────
-  // Global click on any topic name → opens full data modal
   function openTopicDetail(dayId) {
     const day = DAYS_DATA.find(d => String(d.id) === String(dayId));
     if (!day) return;
     const st = ensureDayState(day.id);
     const sched = getEffectiveSchedule();
-    const meta = SECTIONS_META[day.sec];
+    const meta = SECTIONS_META[day.sec] || { label: 'General', color: '#888' };
     const studyDone = !!st.studyDate;
 
     const revCards = sched.map(r => {
@@ -698,6 +793,7 @@ const App = (() => {
       else if (status === 'locked') { statusText = '🔒 Locked'; }
       else if (status === 'upcoming') statusText = fmtDisplay(target);
       else statusText = 'Awaiting study';
+      
       const dateText = done ? fmtDisplay(st.revisions[r.key]) : (target ? fmtDisplay(target) : '—');
 
       return `
@@ -745,23 +841,6 @@ const App = (() => {
       </div>
     `;
     document.getElementById('modal-overlay').classList.add('open');
-  }
-
-  function handleChipFromDetail(dayId, revKey) {
-    const st = ensureDayState(dayId);
-    if (!st.studyDate) { toast('Mark initial study first'); return; }
-    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } // ENFORCE LOCK
-    
-    if (st.revisions[revKey]) {
-      showModal({
-        title: `Remove ${revKey.toUpperCase()}?`,
-        sub: 'Unmark this revision?', confirm: 'Remove', danger: true,
-        onConfirm: () => { unmarkRevision(dayId, revKey); closeModal(); setTimeout(() => openTopicDetail(dayId), 50); }
-      });
-    } else {
-      closeModal();
-      showDateModal(dayId, revKey);
-    }
   }
 
   // ── STATS VIEW ──────────────────────────────────────────────────────────
@@ -860,10 +939,14 @@ const App = (() => {
     const { overdueTopics, pendingRevisions, inProgress, phaseProgress } = getBacklogData();
     const planDay = getPlanDay();
 
-    // Group overdue topics by phase
+    // Group overdue topics by Dynamic Phase Boundaries (PlanDay matched)
     const byPhase = {};
+    const activePhases = getActivePhases();
+    
     overdueTopics.forEach(d => {
-      const phase = STUDY_PLAN.phases.find(p => p.sections.includes(d.sec)) || { label: 'Other', color: '#888', id: 'other' };
+      const phase = activePhases.find(p => d.planDay >= p.days[0] && d.planDay <= p.days[1]) 
+                    || { label: 'Unassigned/Overflow', color: '#888', id: 'other' };
+                    
       if (!byPhase[phase.id]) byPhase[phase.id] = { phase, topics: [] };
       byPhase[phase.id].topics.push(d);
     });
@@ -872,12 +955,12 @@ const App = (() => {
       <div class="backlog-alert">
         <div class="ba-icon">⚠</div>
         <div class="ba-text">
-          <strong>${phaseProgress.behind} topic${phaseProgress.behind>1?'s':''} behind</strong> in ${phaseProgress.phase.label} (${phaseProgress.phase.desc}).<br>
+          <strong>${phaseProgress.behind} topic${phaseProgress.behind>1?'s':''} behind</strong> in ${phaseProgress.phase.label}.<br>
           Studied: ${phaseProgress.studiedCount} of ${phaseProgress.total} relevant topics. Expected by now: ${phaseProgress.expectedCount}.
         </div>
       </div>
     ` : phaseProgress ? `
-      <div class="backlog-ok">✓ On track — ${phaseProgress.studiedCount}/${phaseProgress.total} topics done in current phase</div>
+      <div class="backlog-ok">✓ On track — ${phaseProgress.studiedCount}/${phaseProgress.total} topics done in current phase boundary</div>
     ` : '';
 
     const phaseBacklogHtml = Object.values(byPhase).length > 0 ? `
@@ -906,7 +989,7 @@ const App = (() => {
         </div>
       `).join('')}
     ` : overdueTopics.length === 0 ? `
-      <div class="backlog-ok" style="margin-bottom:16px">✓ All plan-day topics started!</div>
+      <div class="backlog-ok" style="margin-bottom:16px">✓ All required plan-day topics started!</div>
     ` : '';
 
     const revBacklogHtml = pendingRevisions.length > 0 ? `
@@ -948,6 +1031,7 @@ const App = (() => {
     const el = document.getElementById('viewSettings');
     if (!el) return;
     const sched = CONFIG.revSchedule || REV_SCHEDULE;
+    const phases = getActivePhases();
 
     el.innerHTML = `
       <div class="settings-section">
@@ -957,7 +1041,7 @@ const App = (() => {
         <div class="settings-row"><span>Today is Plan Day</span><strong>${getPlanDay()}</strong></div>
         <div class="settings-row"><span>Days to Exam</span><strong>${getDaysToExam()}</strong></div>
         <div class="phase-list">
-          ${STUDY_PLAN.phases.map(p => `
+          ${phases.map(p => `
             <div class="phase-card" style="border-left-color:${p.color}">
               <strong style="color:${p.color}">${p.label}</strong> · Days ${p.days[0]}–${p.days[1]}
               <div class="phase-desc">${p.desc}</div>
@@ -1015,7 +1099,7 @@ const App = (() => {
         const v = parseInt(inp.value);
         if (isNaN(v) || v < 1) { valid = false; return; }
         r.gap = v;
-        r.days = v; // kept for backward compatibility just in case
+        r.days = v; // fallback support
         r.desc = `+${v} Days`;
       }
     });
@@ -1028,9 +1112,10 @@ const App = (() => {
 
   function resetSchedule() {
     CONFIG.revSchedule = REV_SCHEDULE.map(r => ({...r}));
+    CONFIG.phases = STUDY_PLAN.phases.map(p => ({...p}));
     saveToDB();
     renderSettingsView();
-    toast('Reset to default');
+    toast('Reset to default structure');
   }
 
   function confirmResetAll() {
@@ -1042,7 +1127,6 @@ const App = (() => {
       onConfirm: () => {
         STATE = buildFreshState();
         HISTORY = []; FUTURE = [];
-        // Remove custom topics
         const toRemove = DAYS_DATA.filter(d => d.custom).map(d => d.id);
         toRemove.forEach(id => { const idx = DAYS_DATA.findIndex(d => d.id === id); if (idx > -1) DAYS_DATA.splice(idx, 1); });
         saveToDB(); renderAll(); closeModal();
@@ -1077,7 +1161,7 @@ const App = (() => {
     if (e) e.stopPropagation();
     const st = ensureDayState(dayId);
     if (!st.studyDate) { toast('Mark initial study first'); return; }
-    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } // ENFORCE LOCK
+    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; }
     
     if (st.revisions[revKey]) {
       showModal({
@@ -1093,7 +1177,7 @@ const App = (() => {
   function handleChipFromDetail(dayId, revKey) {
     const st = ensureDayState(dayId);
     if (!st.studyDate) { toast('Mark initial study first'); return; }
-    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } // ENFORCE LOCK
+    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } 
     
     if (st.revisions[revKey]) {
       showModal({
@@ -1106,7 +1190,6 @@ const App = (() => {
       showDateModal(dayId, revKey);
     }
   }
-
 
   function handleRevCheck(dayId, revKey, e) {
     if (e) e.stopPropagation();
@@ -1126,7 +1209,7 @@ const App = (() => {
     showDateModal(dayId, type);
   }
 
-  // ── MODAL ─────────────────────────────────────────────────────────────────
+  // ── MODAL UTILS ───────────────────────────────────────────────────────────
   function showModal({ title, sub, confirm, danger, onConfirm }) {
     const mc = document.getElementById('modal-content');
     mc.innerHTML = `
@@ -1177,12 +1260,12 @@ const App = (() => {
     document.getElementById('modal-overlay').classList.remove('open');
   }
 
-  // ── ADD TOPIC MODAL ───────────────────────────────────────────────────────
+  // ── ADD TOPIC / EXTRA LOGIC ───────────────────────────────────────────────
   function showAddTopicModal(sec) {
     const mc = document.getElementById('modal-content');
     mc.innerHTML = `
       <div class="modal-title">Add Topic to ${SECTIONS_META[sec].label}</div>
-      <div class="modal-sub">Will be numbered sequentially after the last topic in this section</div>
+      <div class="modal-sub">Will be numbered sequentially in this section</div>
       <div class="date-input-group">
         <label>Topic Name</label>
         <input type="text" id="newTopicInput" placeholder="Enter topic name..." style="padding:10px 14px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:14px;width:100%;background:var(--surface2);color:var(--text);outline:none" />
@@ -1202,20 +1285,18 @@ const App = (() => {
     if (!topic) { toast('Please enter a topic name'); return; }
     snapshot();
 
-    // Sequential numbering: increment the section counter
     SECTION_ID_COUNTERS[sec] = (SECTION_ID_COUNTERS[sec] || 0) + 1;
     const seqNum = SECTION_ID_COUNTERS[sec];
-    // ID format: c_{sec}_{seqNum} for uniqueness but display uses seqNum
     const customId = `c_${sec}_${seqNum}`;
+    
+    // Attempt to smartly attach to the current phase dynamically
+    const pd = getPlanDay();
 
-    DAYS_DATA.push({ id: customId, sec, topic, custom: true, seqNum, planDay: null });
+    DAYS_DATA.push({ id: customId, sec, topic, custom: true, seqNum, planDay: pd });
     STATE[customId] = { studyDate: null, revisions: initRevs(), extraTopics: [], notes: '' };
     saveToDB(); closeModal(); renderAll();
     toast(`Topic added as #${seqNum}`);
   }
-
-  // Override formatDayId for custom topics to show sequential number
-  const _origFormatDayId = formatDayId;
 
   function showAddExtraTopicModal(dayId) {
     const mc = document.getElementById('modal-content');
@@ -1283,7 +1364,7 @@ const App = (() => {
       state: STATE,
       config: CONFIG,
       customTopics: DAYS_DATA.filter(d => d.custom),
-      idCounters: SECTION_ID_COUNTERS,
+      idCounters: typeof SECTION_ID_COUNTERS !== 'undefined' ? SECTION_ID_COUNTERS : {},
       exportedAt: new Date().toISOString()
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1315,7 +1396,9 @@ const App = (() => {
             }
           });
         }
-        if (parsed.idCounters) Object.assign(SECTION_ID_COUNTERS, parsed.idCounters);
+        if (parsed.idCounters && typeof SECTION_ID_COUNTERS !== 'undefined') {
+            Object.assign(SECTION_ID_COUNTERS, parsed.idCounters);
+        }
         if (parsed.config) CONFIG = { ...buildDefaultConfig(), ...parsed.config };
         saveToDB(); renderAll();
         toast('⬆ Import successful');
@@ -1339,9 +1422,10 @@ const App = (() => {
 
   return {
     init, setView, filterSection,
-    toggleCard,
+    toggleSidebar, toggleCard,
     handleStudyCheck, handleChipClick, handleRevCheck, promptUnmarkStudy,
     showDateModal, showDateModalFor, confirmDateModal, closeModal,
+    showAnalysisModal,
     showAddTopicModal, confirmAddTopic,
     showAddExtraTopicModal, confirmAddExtra,
     confirmRemoveExtra, confirmHideDay,
@@ -1357,4 +1441,3 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-
