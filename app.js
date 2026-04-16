@@ -6,7 +6,7 @@ const App = (() => {
   const KEY     = 'main';
 
   let db = null;
-  let STATE = {};     // { [dayId]: { studyDate, revisions:{r1..r6}, extraTopics:[], notes, hidden } }
+  let STATE = {};     // { [dayId]: { studyDate, revisions:{r1..r8}, extraTopics:[], notes, hidden } }
   let CONFIG = buildDefaultConfig();
   let HISTORY = [];
   let FUTURE  = [];
@@ -166,8 +166,6 @@ const App = (() => {
   function todayISO()   { return fmtISO(TODAY); }
 
   // ── REVISION LOGIC ────────────────────────────────────────────────────────
-  // All revisions computed FROM study date (absolute, not chained)
-    // ── REVISION LOGIC ────────────────────────────────────────────────────────
   function getEffectiveSchedule() {
     return CONFIG.revSchedule || REV_SCHEDULE;
   }
@@ -261,7 +259,7 @@ const App = (() => {
     const planDay = getPlanDay();
     const overdueTopics = []; // planDay passed, not started
     const pendingRevisions = []; // studied but revisions overdue
-    const inProgress = []; // 1-5 revs done
+    const inProgress = []; // in-progress revs
 
     DAYS_DATA.forEach(d => {
       if (ensureDayState(d.id).hidden) return;
@@ -641,14 +639,17 @@ const App = (() => {
       const target = getRevTarget(dayId, r.key, st);
       const done = !!st.revisions[r.key];
       const due = status === 'due-today' || status === 'overdue';
+      const locked = status === 'locked';
 
       let dotClass = 'dot-empty';
       if (done) dotClass = 'dot-done';
       else if (due) dotClass = 'dot-due';
+      else if (locked) dotClass = 'dot-locked';
 
       let nodeClass = 'tl-node';
       if (done) nodeClass += ' tl-done';
       else if (due) nodeClass += ' tl-due-node';
+      else if (locked) nodeClass += ' tl-locked';
 
       const prevDone = idx === 0 ? studyDone : !!st.revisions[sched[idx-1].key];
       const lineClass = prevDone ? 'tl-line line-done' : 'tl-line line-pending';
@@ -656,15 +657,15 @@ const App = (() => {
       html += `<div class="${lineClass}"></div>`;
       html += `
         <div class="${nodeClass}" onclick="App.handleChipClick('${dayId}','${r.key}',event)">
-          <div class="${dotClass} tl-dot">${done ? '✓' : due ? '!' : '·'}</div>
+          <div class="${dotClass} tl-dot">${done ? '✓' : locked ? '🔒' : due ? '!' : '·'}</div>
           <div class="tl-content">
             <div class="tl-label">${r.label} <span class="tl-desc">${r.desc}</span></div>
-            <div class="tl-date ${done ? 'date-done' : due ? 'date-due' : 'date-future'}">
-              ${done ? fmtDisplay(st.revisions[r.key]) : target ? fmtDisplay(target) : '—'}
+            <div class="tl-date ${done ? 'date-done' : locked ? 'date-none' : due ? 'date-due' : 'date-future'}">
+              ${done ? fmtDisplay(st.revisions[r.key]) : target ? fmtDisplay(target) : 'Locked'}
               ${due && !done ? '<span class="due-badge">Due</span>' : ''}
             </div>
           </div>
-          ${!done && st.studyDate ? `
+          ${!done && !locked && st.studyDate ? `
             <button class="tl-snooze" onclick="event.stopPropagation();App.scheduleNextDay('${dayId}','${r.key}')" title="+1 day">→</button>
           ` : ''}
         </div>
@@ -694,6 +695,7 @@ const App = (() => {
       if (done) { cardClass += ' done'; statusText = '✓ Done'; }
       else if (status === 'due-today') { cardClass += ' due-today'; statusText = '● Due Today'; }
       else if (status === 'overdue') { cardClass += ' overdue'; statusText = '! Overdue'; }
+      else if (status === 'locked') { statusText = '🔒 Locked'; }
       else if (status === 'upcoming') statusText = fmtDisplay(target);
       else statusText = 'Awaiting study';
       const dateText = done ? fmtDisplay(st.revisions[r.key]) : (target ? fmtDisplay(target) : '—');
@@ -748,11 +750,12 @@ const App = (() => {
   function handleChipFromDetail(dayId, revKey) {
     const st = ensureDayState(dayId);
     if (!st.studyDate) { toast('Mark initial study first'); return; }
+    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } // ENFORCE LOCK
+    
     if (st.revisions[revKey]) {
       showModal({
         title: `Remove ${revKey.toUpperCase()}?`,
-        sub: 'Unmark this revision?',
-        confirm: 'Remove', danger: true,
+        sub: 'Unmark this revision?', confirm: 'Remove', danger: true,
         onConfirm: () => { unmarkRevision(dayId, revKey); closeModal(); setTimeout(() => openTopicDetail(dayId), 50); }
       });
     } else {
@@ -965,13 +968,13 @@ const App = (() => {
 
       <div class="settings-section">
         <h3>Spaced Repetition Rules</h3>
-        <p class="settings-hint">All revisions are scheduled relative to the <em>initial study date</em> (not chained). R1 = study + 1 day, R2 = study + 3 days, etc.</p>
+        <p class="settings-hint">All revisions are scheduled relative to the <em>previous step's completion date</em> (chained). R1 = study + gap, R2 = R1 + gap, etc.</p>
         <div id="sched-editor">
           ${sched.map((r, i) => `
             <div class="sched-row">
               <span class="sr-key">${r.label}</span>
-              <span class="sr-relto">Study Date +</span>
-              <input class="sr-input" type="number" id="sr-${r.key}" value="${r.days}" min="1" max="365" />
+              <span class="sr-relto">Previous Step +</span>
+              <input class="sr-input" type="number" id="sr-${r.key}" value="${r.gap !== undefined ? r.gap : r.days}" min="1" max="365" />
               <span class="sr-unit">days</span>
             </div>
           `).join('')}
@@ -1011,8 +1014,9 @@ const App = (() => {
       if (inp) {
         const v = parseInt(inp.value);
         if (isNaN(v) || v < 1) { valid = false; return; }
-        r.days = v;
-        r.desc = `Day +${v}`;
+        r.gap = v;
+        r.days = v; // kept for backward compatibility just in case
+        r.desc = `+${v} Days`;
       }
     });
     if (!valid) { toast('⚠ Invalid values'); return; }
@@ -1073,6 +1077,8 @@ const App = (() => {
     if (e) e.stopPropagation();
     const st = ensureDayState(dayId);
     if (!st.studyDate) { toast('Mark initial study first'); return; }
+    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } // ENFORCE LOCK
+    
     if (st.revisions[revKey]) {
       showModal({
         title: `Remove ${revKey.toUpperCase()}?`,
@@ -1083,6 +1089,24 @@ const App = (() => {
       showDateModal(dayId, revKey);
     }
   }
+
+  function handleChipFromDetail(dayId, revKey) {
+    const st = ensureDayState(dayId);
+    if (!st.studyDate) { toast('Mark initial study first'); return; }
+    if (getRevStatus(dayId, revKey, st) === 'locked') { toast('⚠ Complete previous revision first'); return; } // ENFORCE LOCK
+    
+    if (st.revisions[revKey]) {
+      showModal({
+        title: `Remove ${revKey.toUpperCase()}?`,
+        sub: 'Unmark this revision?', confirm: 'Remove', danger: true,
+        onConfirm: () => { unmarkRevision(dayId, revKey); closeModal(); setTimeout(() => openTopicDetail(dayId), 50); }
+      });
+    } else {
+      closeModal();
+      showDateModal(dayId, revKey);
+    }
+  }
+
 
   function handleRevCheck(dayId, revKey, e) {
     if (e) e.stopPropagation();
@@ -1333,3 +1357,4 @@ document.addEventListener('DOMContentLoaded', () => App.init());
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
