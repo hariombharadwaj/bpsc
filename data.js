@@ -1,5 +1,4 @@
-// ─── REVISION SCHEDULE ──────────────────────────────────────────────────────
-// User's actual schedule: from STUDY date (all absolute from study, not chained)
+
 // ─── REVISION SCHEDULE ──────────────────────────────────────────────────────
 // User's actual schedule: CHAINED from the previous revision date
 const REV_SCHEDULE = [
