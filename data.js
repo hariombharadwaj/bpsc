@@ -1,12 +1,14 @@
 // ─── REVISION SCHEDULE ──────────────────────────────────────────────────────
 // User's actual schedule: from STUDY date (all absolute from study, not chained)
+// ─── REVISION SCHEDULE ──────────────────────────────────────────────────────
+// User's actual schedule: CHAINED from the previous revision date
 const REV_SCHEDULE = [
-  { key: 'r1', label: 'R1', desc: 'Day +1',   days: 1  },
-  { key: 'r2', label: 'R2', desc: 'Day +3',   days: 3  },
-  { key: 'r3', label: 'R3', desc: 'Day +7',   days: 7  },
-  { key: 'r4', label: 'R4', desc: 'Day +15',  days: 15 },
-  { key: 'r5', label: 'R5', desc: 'Day +30',  days: 30 },
-  { key: 'r6', label: 'R6', desc: 'Day +75',  days: 75 },
+  { key: 'r1', label: 'R1', desc: '+1 Day',   days: 1  },  // +1 from Study
+  { key: 'r2', label: 'R2', desc: '+2 Days',  days: 2  },  // +2 from R1
+  { key: 'r3', label: 'R3', desc: '+4 Days',  days: 4  },  // +4 from R2
+  { key: 'r4', label: 'R4', desc: '+8 Days',  days: 8  },  // +8 from R3
+  { key: 'r5', label: 'R5', desc: '+15 Days', days: 15 },  // +15 from R4
+  { key: 'r6', label: 'R6', desc: '+45 Days', days: 45 },  // +45 from R5
 ];
 
 // ─── STUDY PLAN ─────────────────────────────────────────────────────────────
