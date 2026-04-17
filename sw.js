@@ -1,5 +1,5 @@
 // ─── BPSC TRACKER v3 · sw.js ─────────────────────────────────────────────────
-const CACHE = ‘bpsc-v3’;  // FIX: bumped version so stale v1 cache is purged
+const CACHE = ‘bpsc-v3.1’; // bumped — forces old cache purge on update
 const FILES = [
 ‘./’,
 ‘./index.html’,
@@ -19,25 +19,36 @@ self.skipWaiting();
 self.addEventListener(‘activate’, e => {
 e.waitUntil(
 caches.keys().then(keys =>
-Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+Promise.all(keys.filter(k => k !== CACHE).map(k => {
+console.log(’[SW] Deleting old cache:’, k);
+return caches.delete(k);
+}))
 )
 );
 self.clients.claim();
 });
 
 self.addEventListener(‘fetch’, e => {
-// Cache-first for app shell, network-first could be used for data
+// Network-first for JS/CSS so updates always get through
+const url = new URL(e.request.url);
+const isAsset = /.(js|css|html)(?.*)?$/.test(url.pathname);
+
+if (isAsset) {
 e.respondWith(
-caches.match(e.request).then(cached => {
-if (cached) return cached;
-return fetch(e.request).then(response => {
-// Cache valid GET responses dynamically
-if (e.request.method === ‘GET’ && response.status === 200) {
+fetch(e.request)
+.then(response => {
+if (response.status === 200) {
 const clone = response.clone();
 caches.open(CACHE).then(c => c.put(e.request, clone));
 }
 return response;
-}).catch(() => cached); // fallback to cache on network failure
 })
+.catch(() => caches.match(e.request)) // fallback to cache on offline
 );
+} else {
+// Cache-first for other assets (icons, fonts)
+e.respondWith(
+caches.match(e.request).then(cached => cached || fetch(e.request))
+);
+}
 });
