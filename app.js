@@ -43,6 +43,8 @@ const saved = await loadFromDB();
 ```
 STATE  = (saved && saved.state)  ? saved.state  : buildFreshState();
 CONFIG = (saved && saved.config) ? { ...buildDefaultConfig(), ...saved.config } : buildDefaultConfig();
+// Normalize any phases loaded from old IndexedDB that used 'range' instead of 'days'
+if (CONFIG.phases) CONFIG.phases = CONFIG.phases.map(p => { if (!p.days && p.range) p.days = p.range; if (!p.days) p.days = [1,90]; return p; });
 
 // Restore custom topics
 if (saved && saved.customTopics) {
@@ -304,10 +306,17 @@ start.setDate(start.getDate() + planDay - 1);
 return fmtISO(start);
 }
 
+// Normalize phase: support old ‘range’ key and new ‘days’ key
+function normalizePhase(p) {
+if (!p.days && p.range) p.days = p.range;
+if (!p.days) p.days = [1, 90];
+return p;
+}
+
 function getCurrentPhase() {
 const pd     = getPlanDay();
-const phases = getActivePhases();
-return phases.find(p => pd >= p.days[0] && pd <= p.days[1]) || phases[phases.length - 1];
+const phases = getActivePhases().map(normalizePhase);
+return phases.find(p => pd >= p.days[0] && pd <= p.days[1]) || phases[phases.length - 1] || null;
 }
 
 function getDaysToExam() {
@@ -339,6 +348,7 @@ DAYS_DATA.forEach(d => {
 const phase = getCurrentPhase();
 let phaseProgress = null;
 if (phase) {
+  normalizePhase(phase);
   const relevantDays    = DAYS_DATA.filter(d => d.planDay >= phase.days[0] && d.planDay <= phase.days[1]);
   const expectedCount   = relevantDays.filter(d => d.planDay <= planDay).length;
   const studiedCount    = relevantDays.filter(d => ensureDayState(d.id).studyDate).length;
@@ -371,7 +381,15 @@ return streak;
 }
 
 // ── ACTIONS ───────────────────────────────────────────────────────────────
-function toggleSidebar() { document.body.classList.toggle(‘sidebar-closed’); }
+function toggleSidebar() {
+// Desktop: toggle sidebar-closed (hides sidebar from layout)
+// Mobile:  toggle sidebar-open  (slides sidebar overlay in/out)
+if (window.innerWidth <= 700) {
+document.body.classList.toggle(‘sidebar-open’);
+} else {
+document.body.classList.toggle(‘sidebar-closed’);
+}
+}
 
 function markStudied(dayId, dateISO) {
 snapshot();
@@ -450,14 +468,16 @@ sub.textContent = ‘’;
 }
 
 function renderAll() {
-renderHeader();
-renderTodayView();
+try { renderHeader(); } catch(e) { console.error(‘renderHeader:’, e); }
+try { renderTodayView(); } catch(e) { console.error(‘renderTodayView:’, e); }
+try {
 if (currentView === ‘all’)      renderAllView();
 if (currentView === ‘stats’)    renderStatsView();
 if (currentView === ‘settings’) renderSettingsView();
 if (currentView === ‘backlog’)  renderBacklogView();
-updateBadges();
-updatePageSub();
+} catch(e) { console.error(‘renderView:’, e); }
+try { updateBadges(); } catch(e) { console.error(‘updateBadges:’, e); }
+try { updatePageSub(); } catch(e) { console.error(‘updatePageSub:’, e); }
 }
 
 function renderCurrentView() {
@@ -1079,7 +1099,7 @@ const activePhases = getActivePhases();
 // Group overdue topics by phase
 const byPhase = {};
 overdueTopics.forEach(d => {
-  const phase = activePhases.find(p => d.planDay >= p.days[0] && d.planDay <= p.days[1])
+  const phase = activePhases.map(normalizePhase).find(p => d.planDay >= p.days[0] && d.planDay <= p.days[1])
              || { label: 'Unassigned', color: '#888', id: 'other' };
   if (!byPhase[phase.id]) byPhase[phase.id] = { phase, topics: [] };
   byPhase[phase.id].topics.push(d);
@@ -1177,7 +1197,7 @@ el.innerHTML = `
     <div class="settings-row"><span>Today is Plan Day</span><strong>${getPlanDay()}</strong></div>
     <div class="settings-row"><span>Days to Exam</span><strong>${getDaysToExam()}</strong></div>
     <div class="phase-list">
-      ${phases.map(p => `
+      ${phases.map(normalizePhase).map(p => `
         <div class="phase-card" style="border-left-color:${p.color}">
           <strong style="color:${p.color}">${p.label}</strong> · Days ${p.days[0]}–${p.days[1]}
           <div class="phase-desc">${p.desc || ''}</div>
