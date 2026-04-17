@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -14,81 +15,95 @@
 </head>
 <body>
   <div id="app">
-    <!-- Sidebar -->
-    <aside id="sidebar">
-      <div class="sidebar-header">
-        <div class="app-logo">
-          <span class="logo-text">BPSC</span>
-        </div>
-        <div class="logo-sub">Prelims 2026 · Tracker</div>
-      </div>
 
-      <nav class="sidebar-nav">
-        <button class="nav-item active" data-view="today" onclick="App.setView('today',this)">
-          <span class="nav-icon">◉</span><span>Today</span>
-          <span class="nav-badge" id="badge-today"></span>
-        </button>
-        <button class="nav-item" data-view="all" onclick="App.setView('all',this)">
-          <span class="nav-icon">▦</span><span>All Days</span>
-        </button>
-        <button class="nav-item" data-view="backlog" onclick="App.setView('backlog',this)">
-          <span class="nav-icon">⚑</span><span>Backlog</span>
-          <span class="nav-badge" id="badge-backlog"></span>
-        </button>
-        <button class="nav-item" data-view="stats" onclick="App.setView('stats',this)">
-          <span class="nav-icon">◈</span><span>Statistics</span>
-        </button>
-        <button class="nav-item" data-view="settings" onclick="App.setView('settings',this)">
-          <span class="nav-icon">⚙</span><span>Settings</span>
-        </button>
-      </nav>
-
-      <div class="sidebar-sections">
-        <div class="section-label">Sections</div>
-        <button class="sec-item active" data-sec="all" onclick="App.filterSection('all',this)">All Topics</button>
-        <button class="sec-item" data-sec="science"  onclick="App.filterSection('science',this)">General Science</button>
-        <button class="sec-item" data-sec="ancient"  onclick="App.filterSection('ancient',this)">Ancient India</button>
-        <button class="sec-item" data-sec="medieval" onclick="App.filterSection('medieval',this)">Medieval India</button>
-        <button class="sec-item" data-sec="modern"   onclick="App.filterSection('modern',this)">Modern India</button>
-        <button class="sec-item" data-sec="polity"   onclick="App.filterSection('polity',this)">Polity + Geography</button>
-        <button class="sec-item" data-sec="bihar"    onclick="App.filterSection('bihar',this)">Bihar + Economics</button>
-        <button class="sec-item" data-sec="maths"    onclick="App.filterSection('maths',this)">Maths + Reasoning</button>
-      </div>
-
-      <div class="sidebar-footer">
-        <div class="undo-redo">
-          <button class="ur-btn" id="undoBtn" onclick="App.undo()">↩ Undo</button>
-          <button class="ur-btn" id="redoBtn" onclick="App.redo()">↪ Redo</button>
-        </div>
-        <div class="version-tag">v3.0 · 140 Topics</div>
-      </div>
-    </aside>
-
-    <!-- Main -->
-    <main id="main">
-      <header id="topbar">
-                <div class="topbar-left" style="display:flex; align-items:center;">
-          <button class="menu-btn" onclick="App.toggleSidebar()">☰</button>
-          <div>
-            <div class="page-title" id="pageTitle">Today</div>
-            <div class="page-sub" id="pageSub"></div>
-          </div>
-        </div>
-
-        <div class="topbar-right">
-          <div class="exam-chip" id="examCountdown"></div>
-          <div class="today-date" id="dateDisplay"></div>
-          <div class="streak-chip" id="streakChip">🔥 0</div>
-        </div>
-      </header>
-
-      <div id="viewToday"    class="view active"></div>
-      <div id="viewAll"      class="view"></div>
-      <div id="viewBacklog"  class="view"></div>
-      <div id="viewStats"    class="view"></div>
-      <div id="viewSettings" class="view"></div>
-    </main>
+```
+<!-- Sidebar -->
+<aside id="sidebar">
+  <div class="sidebar-header">
+    <div class="app-logo">
+      <span class="logo-text">BPSC</span>
+    </div>
+    <div class="logo-sub">Prelims 2026 · Tracker</div>
   </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-item active" data-view="today" onclick="App.setView('today',this)">
+      <span class="nav-icon">◉</span><span>Today</span>
+      <span class="nav-badge" id="badge-today"></span>
+    </button>
+    <button class="nav-item" data-view="all" onclick="App.setView('all',this)">
+      <span class="nav-icon">▦</span><span>All Days</span>
+    </button>
+    <button class="nav-item" data-view="backlog" onclick="App.setView('backlog',this)">
+      <span class="nav-icon">⚑</span><span>Backlog</span>
+      <span class="nav-badge" id="badge-backlog"></span>
+    </button>
+    <button class="nav-item" data-view="stats" onclick="App.setView('stats',this)">
+      <span class="nav-icon">◈</span><span>Statistics</span>
+    </button>
+    <button class="nav-item" data-view="settings" onclick="App.setView('settings',this)">
+      <span class="nav-icon">⚙</span><span>Settings</span>
+    </button>
+  </nav>
+
+  <div class="sidebar-sections">
+    <div class="section-label">Sections</div>
+    <button class="sec-item active" data-sec="all"       onclick="App.filterSection('all',this)">All Topics</button>
+    <button class="sec-item"        data-sec="science"   onclick="App.filterSection('science',this)">General Science</button>
+    <button class="sec-item"        data-sec="ancient"   onclick="App.filterSection('ancient',this)">Ancient India</button>
+    <button class="sec-item"        data-sec="medieval"  onclick="App.filterSection('medieval',this)">Medieval India</button>
+    <button class="sec-item"        data-sec="modern"    onclick="App.filterSection('modern',this)">Modern India</button>
+    <button class="sec-item"        data-sec="bihar"     onclick="App.filterSection('bihar',this)">Bihar Special</button>
+    <button class="sec-item"        data-sec="polity"    onclick="App.filterSection('polity',this)">Polity</button>
+    <button class="sec-item"        data-sec="geography" onclick="App.filterSection('geography',this)">Geography</button>
+    <button class="sec-item"        data-sec="economy"   onclick="App.filterSection('economy',this)">Economics</button><!-- FIX: was missing -->
+    <button class="sec-item"        data-sec="maths"     onclick="App.filterSection('maths',this)">Maths &amp; Reasoning</button>
+    <button class="sec-item"        data-sec="ca_p1"     onclick="App.filterSection('ca_p1',this)">CA Jun 25–Mar 26</button>
+    <button class="sec-item"        data-sec="ca_p2"     onclick="App.filterSection('ca_p2',this)">CA Apr–May 26</button>
+    <button class="sec-item"        data-sec="ca_p3"     onclick="App.filterSection('ca_p3',this)">CA Jun–Jul 26</button>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="undo-redo">
+      <button class="ur-btn" id="undoBtn" onclick="App.undo()">↩ Undo</button>
+      <button class="ur-btn" id="redoBtn" onclick="App.redo()">↪ Redo</button>
+    </div>
+    <div class="version-tag">v3.0 · 140 Topics</div>
+  </div>
+</aside>
+
+<!-- Main -->
+<main id="main">
+  <header id="topbar">
+    <div class="topbar-left" style="display:flex;align-items:center;">
+      <!-- FIX: menu button always visible, opens sidebar overlay on mobile -->
+      <button class="menu-btn" onclick="App.toggleSidebar()">☰</button>
+      <div>
+        <div class="page-title" id="pageTitle">Today</div>
+        <div class="page-sub"   id="pageSub"></div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <div class="exam-chip"  id="examCountdown"></div>
+      <div class="today-date" id="dateDisplay"></div>
+      <div class="streak-chip" id="streakChip">🔥 0</div>
+    </div>
+  </header>
+
+  <div id="viewToday"    class="view active"></div>
+  <div id="viewAll"      class="view"></div>
+  <div id="viewBacklog"  class="view"></div>
+  <div id="viewStats"    class="view"></div>
+  <div id="viewSettings" class="view"></div>
+</main>
+```
+
+  </div>
+
+  <!-- Mobile sidebar overlay backdrop -->
+
+  <div id="sidebar-backdrop" onclick="App.toggleSidebar()"></div>
 
   <div id="toast"></div>
 
@@ -99,6 +114,8 @@
   </div>
 
   <script src="data.js"></script>
+
   <script src="app.js"></script>
+
 </body>
 </html>
