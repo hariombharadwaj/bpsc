@@ -328,3 +328,228 @@ body.sidebar-closed #sidebar { display: none; }
   #modal-box { padding: 20px; width: 92vw; }
   .analysis-stat { font-size: 12px; flex-direction: column; gap: 4px; padding: 12px 0; }
 }
+
+/* Delete button in card header */
+.dc-delete-btn {
+  background: transparent;
+  border: 1px solid #FCA5A5;
+  color: var(--red);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.dc-delete-btn:hover {
+  background: var(--red-light);
+}
+
+/* ── RECALIBRATION MODAL STYLES ──────────────────────────────────────────── */
+
+/* Tab switcher inside modal */
+.modal-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.modal-tab {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--sans);
+  white-space: nowrap;
+}
+.modal-tab:hover { background: var(--surface3); color: var(--text1); }
+.modal-tab.active {
+  background: var(--burgundy);
+  border-color: var(--burgundy-d);
+  color: #fff;
+}
+
+/* Badge on modal title */
+.modal-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-left: 8px;
+  vertical-align: middle;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.modal-badge.red   { background: var(--red-light);   color: var(--red);   border: 1px solid var(--red); }
+.modal-badge.green { background: var(--green-light);  color: var(--green); border: 1px solid var(--green); }
+
+/* Phase timeline */
+.rcal-phase-timeline { margin-bottom: 18px; }
+.rcal-timeline-track {
+  position: relative;
+  height: 6px;
+  background: var(--surface2);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  overflow: visible;
+}
+.rcal-timeline-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+.rcal-timeline-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 12px;
+  height: 12px;
+  background: var(--burgundy);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--burgundy);
+}
+.rcal-timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text3);
+  font-family: var(--mono);
+  margin-top: 4px;
+}
+
+/* Progress bar */
+.rcal-prog-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.rcal-prog-label { font-size: 12px; color: var(--text2); font-weight: 600; }
+.rcal-prog-val   { font-size: 14px; font-weight: 800; color: var(--text1); font-family: var(--mono); }
+.rcal-bar-track {
+  height: 8px;
+  background: var(--surface2);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.rcal-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+
+/* 4-cell stat grid */
+.rcal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.rcal-cell {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+}
+.rcal-num {
+  font-size: 22px;
+  font-weight: 800;
+  font-family: var(--mono);
+  color: var(--text1);
+  line-height: 1.1;
+}
+.rcal-denom { font-size: 13px; font-weight: 500; color: var(--text3); }
+.rcal-lbl   { font-size: 10px; color: var(--text3); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.rcal-red   { color: var(--red) !important; }
+.rcal-green { color: var(--green) !important; }
+
+/* Recalibrated pace block */
+.rcal-pace-block {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.rcal-pace-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.rcal-pace-row:last-child { border-bottom: none; }
+.rcal-pace-row.main { font-size: 14px; }
+.rcal-pace-row span { color: var(--text2); }
+.rcal-pace-row strong { font-family: var(--mono); font-size: 13px; }
+.rcal-pace-row.main strong { font-size: 15px; }
+
+/* Phase breakdown rows (Coverage tab) */
+.rcal-phase-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  gap: 8px;
+}
+
+/* Spaced repetition ladder (Memory tab) */
+.rcal-rev-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.rcal-rev-key {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--mono);
+  color: var(--text2);
+  width: 28px;
+  flex-shrink: 0;
+}
+.rcal-rev-bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: var(--surface2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.rcal-rev-bar {
+  height: 100%;
+  background: var(--burgundy);
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+.rcal-rev-pct {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text3);
+  width: 40px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* Mobile adjustments */
+@media (max-width: 480px) {
+  .rcal-grid { grid-template-columns: repeat(2, 1fr); }
+  .rcal-timeline-labels { font-size: 9px; }
+  .rcal-num { font-size: 18px; }
+  .modal-tabs { gap: 4px; }
+  .modal-tab { padding: 4px 9px; font-size: 10px; }
+  .rcal-phase-row { font-size: 11px; flex-wrap: wrap; }
+}

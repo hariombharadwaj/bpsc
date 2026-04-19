@@ -295,9 +295,23 @@ const App = (() => {
   }
 
   // ── PLAN / PHASE HELPERS ──────────────────────────────────────────────────
+
+  // IST offset = UTC+5:30
+  function getTodayIST() {
+    const now = new Date();
+    // Convert to IST by adding 5h30m to UTC
+    const istOffset = 5.5 * 60 * 60000;
+    const ist = new Date(now.getTime() + istOffset - now.getTimezoneOffset() * 60000);
+    ist.setHours(0, 0, 0, 0);
+    return ist;
+  }
+
   function getPlanDay() {
-    const start = new Date(STUDY_PLAN.startDate + 'T00:00:00');
-    return Math.max(1, Math.floor((TODAY - start) / 86400000) + 1);
+    const start = new Date(STUDY_PLAN.startDate + 'T00:00:00+05:30');
+    const todayIST = getTodayIST();
+    const startIST = new Date(start.getTime());
+    startIST.setHours(0, 0, 0, 0);
+    return Math.max(1, Math.floor((todayIST - startIST) / 86400000) + 1);
   }
 
   function getPlanDateForDay(planDay) {
@@ -322,39 +336,192 @@ const App = (() => {
     return daysDiff(todayISO(), STUDY_PLAN.examDate);
   }
 
-  function getBacklogData() {
-    const planDay = getPlanDay();
-    const overdueTopics    = [];
-    const pendingRevisions = [];
-    const inProgress       = [];
+  // ── DYNAMIC PHASE SCHEDULER ───────────────────────────────────────────────
+  //
+  // LOGIC:
+  // 1. Get all topics for this phase (by section)
+  // 2. Separate into: already read (done) vs unread (pending)
+  // 3. buffer = R1gap + R2gap + R3gap (days needed after last read to finish R3)
+  // 4. availableDays = totalPhaseDays - buffer
+  // 5. topicsPerDay = ceil(totalTopics / availableDays)  ← more topics/day so all finish R3 in phase
+  // 6. Recalibrate: assign ONLY unread topics to dates starting from TODAY
+  //    (already read topics keep their actual study date, no reassignment needed)
+  // 7. If a topic's assigned date < today → it is BACKLOG
+  // 8. Every time a topic is marked read → scheduler recalibrates remaining unread topics
+  //
+  // This means:
+  // - topicsPerDay is fixed by phase math (e.g. 2/day for Phase 1)
+  // - As you read topics, remaining topics shift forward from today
+  // - Backlog = unread topics whose assigned date is already past
+  // ─────────────────────────────────────────────────────────────────────────
 
-    DAYS_DATA.forEach(d => {
-      if (ensureDayState(d.id).hidden) return;
-      const st    = ensureDayState(d.id);
-      const sched = getEffectiveSchedule();
-      const revsDone = sched.filter(r => st.revisions[r.key]).length;
+  function getPhaseTopics(phase) {
+    normalizePhase(phase);
+    return DAYS_DATA.filter(d => phase.sections && phase.sections.includes(d.sec));
+  }
 
-      if (!st.studyDate) {
-        if (d.planDay && d.planDay <= planDay) overdueTopics.push(d);
-      } else {
-        const overdueRevs = sched.filter(r => getRevStatus(d.id, r.key, st) === 'overdue').length;
-        if (overdueRevs > 0) pendingRevisions.push({ day: d, overdueRevs, revsDone });
-        else if (revsDone < sched.length) inProgress.push({ day: d, revsDone });
-      }
+  function computePhaseSchedule(phase) {
+    normalizePhase(phase);
+    const sched     = getEffectiveSchedule();
+    const allTopics = getPhaseTopics(phase);
+    const totalDays = phase.days[1] - phase.days[0] + 1;
+
+    // Buffer = sum of R1+R2+R3 gaps so last read topic can still finish R3 in phase
+    const r1gap  = sched[0] ? sched[0].gap : 1;
+    const r2gap  = sched[1] ? sched[1].gap : 2;
+    const r3gap  = sched[2] ? sched[2].gap : 4;
+    const buffer = r1gap + r2gap + r3gap; // = 7 by default
+
+    // topicsPerDay based on TOTAL topics in phase (fixed pace target)
+    const availableDays = Math.max(1, totalDays - buffer);
+    const topicsPerDay  = Math.ceil(allTopics.length / availableDays);
+
+    // Split into read and unread
+    const readTopics   = allTopics.filter(d => ensureDayState(d.id).studyDate);
+    const unreadTopics = allTopics.filter(d => !ensureDayState(d.id).studyDate);
+
+    // Phase start and end calendar dates
+    const phaseStartDate = getPlanDateForDay(phase.days[0]);
+    const phaseEndDate   = getPlanDateForDay(phase.days[1]);
+    const tISO           = todayISO();
+
+    // Recalibrate: assign unread topics starting from TODAY (or phase start if not started yet)
+    // Assign in batches of topicsPerDay per day
+    const assignments = {}; // topicId → { assignedDate, daysLate }
+
+    // Already read topics: their assignment = their actual study date (done, no recalibration needed)
+    readTopics.forEach(d => {
+      const st = ensureDayState(d.id);
+      assignments[String(d.id)] = {
+        assignedDate: st.studyDate,
+        status: 'done',
+        daysLate: 0,
+      };
     });
 
+    // Unread topics: assign from today forward in batches of topicsPerDay
+    // startDate = max(today, phaseStartDate)
+    const assignStartDate = tISO >= phaseStartDate ? tISO : phaseStartDate;
+
+    unreadTopics.forEach((topic, idx) => {
+      const dayOffset    = Math.floor(idx / topicsPerDay);
+      const assignedDate = addDays(assignStartDate, dayOffset);
+      const isPast       = assignedDate < tISO;
+      const isToday_     = assignedDate === tISO;
+      const daysLate     = isPast ? daysDiff(assignedDate, tISO) : 0;
+
+      assignments[String(topic.id)] = {
+        assignedDate,
+        status: isPast ? 'overdue' : isToday_ ? 'today' : 'upcoming',
+        daysLate,
+      };
+    });
+
+    // Phase progress stats
+    const studiedCount  = readTopics.length;
+    const expectedByNow = allTopics.filter(d => {
+      const a = assignments[String(d.id)];
+      return a && a.assignedDate <= tISO;
+    }).length;
+    const behind = Math.max(0, expectedByNow - studiedCount);
+
+    return {
+      assignments,
+      topicsPerDay,
+      availableDays,
+      buffer,
+      allTopics,
+      readTopics,
+      unreadTopics,
+      studiedCount,
+      expectedByNow,
+      behind,
+      phaseStartDate,
+      phaseEndDate,
+    };
+  }
+
+  // Get today's assigned unread topics for Today view
+  function getTodayTargets() {
+    const tISO    = todayISO();
+    const targets = [];
+    getActivePhases().map(normalizePhase).forEach(phase => {
+      const { assignments } = computePhaseSchedule(phase);
+      Object.entries(assignments).forEach(([id, info]) => {
+        if (info.assignedDate === tISO && info.status === 'today') {
+          const topic = DAYS_DATA.find(d => String(d.id) === String(id));
+          if (topic) targets.push({ topic, info });
+        }
+      });
+    });
+    return targets;
+  }
+
+  // Get upcoming unread topics (next few days after today)
+  function getUpcomingTargets() {
+    const tISO    = todayISO();
+    const upcoming = [];
+    getActivePhases().map(normalizePhase).forEach(phase => {
+      const { assignments } = computePhaseSchedule(phase);
+      Object.entries(assignments).forEach(([id, info]) => {
+        if (info.status === 'upcoming') {
+          const topic = DAYS_DATA.find(d => String(d.id) === String(id));
+          if (topic) upcoming.push({ topic, info });
+        }
+      });
+    });
+    upcoming.sort((a, b) => a.info.assignedDate.localeCompare(b.info.assignedDate));
+    return upcoming.slice(0, 5);
+  }
+
+  // ── PHASE PULSE (Recalibration Card) ─────────────────────────────────────
+
+
+  function getBacklogData() {
+    const overdueTopics    = [];
+    const pendingRevisions = [];
+
+    // Collect overdue reads across all phases
+    getActivePhases().map(normalizePhase).forEach(phase => {
+      const { assignments } = computePhaseSchedule(phase);
+      Object.entries(assignments).forEach(([id, info]) => {
+        if (info.status === 'overdue') {
+          const topic = DAYS_DATA.find(d => String(d.id) === String(id));
+          if (topic) {
+            overdueTopics.push({ day: topic, assignedDate: info.assignedDate, daysLate: info.daysLate });
+          }
+        }
+      });
+    });
+
+    // Sort most overdue first
+    overdueTopics.sort((a, b) => b.daysLate - a.daysLate);
+
+    // Collect overdue revisions
+    DAYS_DATA.forEach(d => {
+      const st = ensureDayState(d.id);
+      if (!st.studyDate) return;
+      const sched = getEffectiveSchedule();
+      const overdueRevs = sched.filter(r => getRevStatus(d.id, r.key, st) === 'overdue').length;
+      if (overdueRevs > 0) pendingRevisions.push({ day: d, overdueRevs });
+    });
+
+    // Phase progress for current phase
     const phase = getCurrentPhase();
     let phaseProgress = null;
     if (phase) {
-      normalizePhase(phase);
-      const relevantDays  = DAYS_DATA.filter(d => d.planDay >= phase.days[0] && d.planDay <= phase.days[1]);
-      const expectedCount = relevantDays.filter(d => d.planDay <= planDay).length;
-      const studiedCount  = relevantDays.filter(d => ensureDayState(d.id).studyDate).length;
-      const behind        = Math.max(0, expectedCount - studiedCount);
-      phaseProgress = { phase, expectedCount, studiedCount, behind, total: relevantDays.length };
+      const result = computePhaseSchedule(phase);
+      phaseProgress = {
+        phase,
+        studiedCount:  result.studiedCount,
+        total:         result.allTopics.length,
+        expectedByNow: result.expectedByNow,
+        behind:        result.behind,
+        topicsPerDay:  result.topicsPerDay,
+      };
     }
 
-    return { overdueTopics, pendingRevisions, inProgress, phaseProgress };
+    return { overdueTopics, pendingRevisions, phaseProgress };
   }
 
   function calcStreak() {
@@ -506,13 +673,15 @@ const App = (() => {
     const el = document.getElementById('viewToday');
     if (!el) return;
 
-    const sched        = getEffectiveSchedule();
-    const studied      = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length;
-    const totalRevDone = DAYS_DATA.reduce((acc,d) => acc + sched.filter(r => ensureDayState(d.id).revisions[r.key]).length, 0);
-    const planDay      = getPlanDay();
-    const phase        = getCurrentPhase();
+    const sched         = getEffectiveSchedule();
+    const studied       = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length;
+    const totalRevDone  = DAYS_DATA.reduce((acc,d) => acc + sched.filter(r => ensureDayState(d.id).revisions[r.key]).length, 0);
+    const planDay       = getPlanDay();
+    const phase         = getCurrentPhase();
     const phaseDaysLeft = phase ? Math.max(0, phase.days[1] - planDay) : 0;
+    const tISO          = todayISO();
 
+    // Overdue revisions + due today revisions
     const dueItems = [];
     DAYS_DATA.forEach(day => {
       const st = ensureDayState(day.id);
@@ -525,8 +694,14 @@ const App = (() => {
       });
     });
 
-    const tISO = todayISO();
-    const studiedToday = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate === tISO);
+    // Today's initial read targets (assigned by phase scheduler for today)
+    const todayTargets  = getTodayTargets();
+
+    // Topics studied today
+    const studiedToday  = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate === tISO);
+
+    // Upcoming targets (next few days)
+    const upcomingTargets = getUpcomingTargets();
 
     const phaseHtml = phase ? (
       '<div class="plan-bar">' +
@@ -536,11 +711,47 @@ const App = (() => {
       '</div>'
     ) : '';
 
+    // Today's read targets section
+    const todayTargetsHtml = todayTargets.length > 0 ?
+      '<div class="section-title" style="margin-top:24px">📖 Today\'s Read Targets <span class="count-chip orange">' + todayTargets.length + '</span></div>' +
+      '<div class="rev-due-list">' +
+        todayTargets.map(({ topic }) =>
+          '<div class="rev-due-card" style="border-left:3px solid var(--gold)">' +
+            '<div class="rdc-day">' + formatDayId(topic.id) + '</div>' +
+            '<div class="rdc-topic" onclick="App.openTopicDetail(\'' + topic.id + '\')">' +
+              topic.topic +
+              '<small>' + (SECTIONS_META[topic.sec] ? SECTIONS_META[topic.sec].label : '') + ' · Scheduled for today</small>' +
+            '</div>' +
+            '<div class="rdc-actions">' +
+              '<button class="bl-mark" onclick="App.showDateModal(\'' + topic.id + '\',\'study\')">Mark Read</button>' +
+            '</div>' +
+          '</div>'
+        ).join('') +
+      '</div>'
+    : '<div class="section-title" style="margin-top:24px">📖 Today\'s Read Targets</div>' +
+      '<div class="no-due" style="background:var(--gold-light);border-color:#EDD894;color:var(--gold)">✓ No new reads scheduled for today</div>';
+
+    // Upcoming section (next 5 topics)
+    const upcomingHtml = upcomingTargets.length > 0 ?
+      '<div class="section-title" style="margin-top:24px">🗓 Coming Up Next</div>' +
+      '<div class="rev-due-list">' +
+        upcomingTargets.map(({ topic, info }) =>
+          '<div class="rev-due-card" style="opacity:0.7">' +
+            '<div class="rdc-day" style="background:var(--surface2)">' + fmtDisplay(info.assignedDate) + '</div>' +
+            '<div class="rdc-topic">' +
+              topic.topic +
+              '<small>' + (SECTIONS_META[topic.sec] ? SECTIONS_META[topic.sec].label : '') + '</small>' +
+            '</div>' +
+          '</div>'
+        ).join('') +
+      '</div>'
+    : '';
+
     el.innerHTML = phaseHtml +
       '<div class="today-hero">' +
         '<div class="hero-card accent" onclick="App.showAnalysisModal(\'due\')">' +
           '<div class="hero-num">' + dueItems.length + '</div>' +
-          '<div class="hero-label">Due Today</div>' +
+          '<div class="hero-label">Revisions Due</div>' +
         '</div>' +
         '<div class="hero-card" onclick="App.showAnalysisModal(\'studied\')">' +
           '<div class="hero-num">' + studied + '</div>' +
@@ -556,16 +767,21 @@ const App = (() => {
         '</div>' +
       '</div>' +
 
+      // Revisions due
       (dueItems.length > 0 ?
-        '<div class="section-title">Revisions Due <span class="count-chip">' + dueItems.length + '</span></div>' +
+        '<div class="section-title">🔁 Revisions Due <span class="count-chip">' + dueItems.length + '</span></div>' +
         '<div class="rev-due-list">' + dueItems.map(item => renderDueCard(item)).join('') + '</div>'
       :
-        '<div class="section-title">Revisions Due</div>' +
+        '<div class="section-title">🔁 Revisions Due</div>' +
         '<div class="no-due">✓ No revisions due today — well done!</div>'
       ) +
 
+      // Today's read targets
+      todayTargetsHtml +
+
+      // Studied today
       (studiedToday.length > 0 ?
-        '<div class="section-title" style="margin-top:28px">Studied Today <span class="count-chip green">' + studiedToday.length + '</span></div>' +
+        '<div class="section-title" style="margin-top:24px">✅ Read Today <span class="count-chip green">' + studiedToday.length + '</span></div>' +
         '<div class="rev-due-list">' +
           studiedToday.map(day =>
             '<div class="rev-due-card completed">' +
@@ -579,7 +795,10 @@ const App = (() => {
             '</div>'
           ).join('') +
         '</div>'
-      : '');
+      : '') +
+
+      // Upcoming
+      upcomingHtml;
   }
 
   function renderDueCard(item) {
@@ -622,68 +841,244 @@ const App = (() => {
   }
 
   // ── ANALYTICS MODALS ──────────────────────────────────────────────────────
+  // ── RECALIBRATION MODAL (replaces old static analysis modal) ─────────────
+  // Every hero card tap → opens this with live recalibrated data for that type.
+  // No stale numbers. Computed fresh from STATE on every open.
   function showAnalysisModal(type) {
-    const planDay = getPlanDay();
-    const phase   = getCurrentPhase();
-    const bd      = getBacklogData();
-    const sched   = getEffectiveSchedule();
-    let title = '', html = '', insight = '';
+    const planDay  = getPlanDay();
+    const phase    = getCurrentPhase();
+    const bd       = getBacklogData();
+    const sched    = getEffectiveSchedule();
+    const tISO     = todayISO();
+    let title = '', html = '', insight = '', badge = '';
 
-    if (type === 'due') {
+    // ── TAB SWITCHER (inline, not separate modal) ─────────────────────────
+    const tabs = [
+      { key:'phase',     icon:'📊', label:'Phase'    },
+      { key:'due',       icon:'🔁', label:'Revisions'},
+      { key:'studied',   icon:'📖', label:'Coverage' },
+      { key:'revisions', icon:'🧠', label:'Memory'   },
+    ];
+    const tabHtml = '<div class="modal-tabs">' +
+      tabs.map(t =>
+        '<button class="modal-tab' + (t.key === type ? ' active' : '') + '" onclick="App.showAnalysisModal(\'' + t.key + '\')">' +
+          t.icon + ' ' + t.label +
+        '</button>'
+      ).join('') +
+    '</div>';
+
+    // ── PHASE TRAJECTORY (primary / default) ──────────────────────────────
+    if (type === 'phase') {
+      if (phase) {
+        const result       = computePhaseSchedule(phase);
+        const phaseDay     = planDay - phase.days[0] + 1;
+        const phaseTotalD  = phase.days[1] - phase.days[0] + 1;
+        const daysLeft     = Math.max(0, phase.days[1] - planDay);
+        const read         = result.studiedCount;
+        const total        = result.allTopics.length;
+        const expected     = result.expectedByNow;
+        const backlog      = result.behind;
+        const ahead        = Math.max(0, read - expected);
+        const remaining    = total - read;
+        const newPace      = daysLeft > 0 ? (remaining / daysLeft).toFixed(1) : remaining;
+        const origPace     = result.topicsPerDay;
+        const pct          = total > 0 ? Math.round((read / total) * 100) : 0;
+        const barPct       = Math.min(100, pct);
+
+        title = phase.label + ' · Live Recalibration';
+        badge = backlog > 0 ? '<span class="modal-badge red">' + backlog + ' behind</span>' :
+                ahead  > 0 ? '<span class="modal-badge green">+' + ahead + ' ahead</span>' :
+                             '<span class="modal-badge green">On pace</span>';
+
+        // Phase timeline bar
+        const phaseBarWidth = Math.min(100, Math.round(((phaseDay - 1) / phaseTotalD) * 100));
+        const phaseTimeHtml =
+          '<div class="rcal-phase-timeline">' +
+            '<div class="rcal-timeline-track">' +
+              '<div class="rcal-timeline-fill" style="width:' + phaseBarWidth + '%;background:' + phase.color + '"></div>' +
+              '<div class="rcal-timeline-marker" style="left:' + phaseBarWidth + '%"></div>' +
+            '</div>' +
+            '<div class="rcal-timeline-labels">' +
+              '<span>Day ' + phase.days[0] + ' · ' + fmtDisplay(result.phaseStartDate) + '</span>' +
+              '<span style="color:' + phase.color + ';font-weight:700">▲ Today · Day ' + phaseDay + '</span>' +
+              '<span>Day ' + phase.days[1] + ' · ' + fmtDisplay(result.phaseEndDate) + '</span>' +
+            '</div>' +
+          '</div>';
+
+        // Progress bar
+        const progressHtml =
+          '<div class="rcal-prog-row">' +
+            '<span class="rcal-prog-label">Topics Completed</span>' +
+            '<span class="rcal-prog-val">' + pct + '%</span>' +
+          '</div>' +
+          '<div class="rcal-bar-track"><div class="rcal-bar-fill" style="width:' + barPct + '%;background:' + phase.color + '"></div></div>';
+
+        // Stat grid
+        const statGridHtml =
+          '<div class="rcal-grid">' +
+            '<div class="rcal-cell"><div class="rcal-num">' + read + '<span class="rcal-denom">/' + total + '</span></div><div class="rcal-lbl">Read</div></div>' +
+            '<div class="rcal-cell"><div class="rcal-num' + (backlog > 0 ? ' rcal-red' : '') + '">' + expected + '</div><div class="rcal-lbl">Expected</div></div>' +
+            '<div class="rcal-cell"><div class="rcal-num' + (backlog > 0 ? ' rcal-red' : ' rcal-green') + '">' + (backlog > 0 ? '−'+backlog : ahead > 0 ? '+'+ahead : '0') + '</div><div class="rcal-lbl">' + (backlog > 0 ? 'Backlog' : 'Ahead') + '</div></div>' +
+            '<div class="rcal-cell"><div class="rcal-num">' + daysLeft + '</div><div class="rcal-lbl">Days Left</div></div>' +
+          '</div>';
+
+        // Recalibrated pace block
+        const paceUp   = parseFloat(newPace) > origPace + 0.1;
+        const paceDown = parseFloat(newPace) < origPace - 0.1;
+        const paceHtml =
+          '<div class="rcal-pace-block">' +
+            '<div class="rcal-pace-row">' +
+              '<span>Original pace</span><strong>' + origPace + ' topics/day</strong>' +
+            '</div>' +
+            '<div class="rcal-pace-row main">' +
+              '<span>Required now</span>' +
+              '<strong class="' + (paceUp ? 'rcal-red' : paceDown ? 'rcal-green' : '') + '">' +
+                newPace + ' topics/day ' + (paceUp ? '▲' : paceDown ? '▼' : '–') +
+              '</strong>' +
+            '</div>' +
+            (backlog > 0 ?
+              '<div class="rcal-pace-row">' +
+                '<span>To recover backlog</span><strong class="rcal-red">+' + Math.ceil(backlog / Math.max(1, daysLeft)) + ' extra/day</strong>' +
+              '</div>' : '') +
+            '<div class="rcal-pace-row">' +
+              '<span>Topics remaining</span><strong>' + remaining + '</strong>' +
+            '</div>' +
+          '</div>';
+
+        insight = backlog > 3
+          ? '🔴 You are ' + backlog + ' topics behind. Halt new progression — clear the backlog in Backlog tab. New pace: ' + newPace + '/day.'
+          : backlog > 0
+          ? '🟡 ' + backlog + ' topic' + (backlog>1?'s':'') + ' behind schedule. Read 1 extra topic today to recover. Pace resets to ' + newPace + '/day.'
+          : ahead > 0
+          ? '🟢 ' + ahead + ' topics ahead. Your pace has relaxed to ' + newPace + '/day. Maintain discipline.'
+          : '✅ Exactly on pace. Required rate is ' + newPace + ' topics/day for remaining ' + daysLeft + ' days.';
+
+        html = phaseTimeHtml + progressHtml + statGridHtml + paceHtml;
+      } else {
+        title = 'Phase Trajectory';
+        html  = '<div class="analysis-stat"><span>Status</span><strong>No active phase</strong></div>';
+        insight = 'Study plan has ended or not started.';
+      }
+    }
+
+    // ── REVISIONS DUE ─────────────────────────────────────────────────────
+    else if (type === 'due') {
       const dueCount = DAYS_DATA.filter(d => isDayActionable(d.id)).length;
+      const overdueCount = DAYS_DATA.reduce((acc, d) => {
+        const st = ensureDayState(d.id);
+        return acc + sched.filter(r => getRevStatus(d.id, r.key, st) === 'overdue').length;
+      }, 0);
       const doneTodayCount = DAYS_DATA.filter(d => {
         const st = ensureDayState(d.id);
-        return st.studyDate === todayISO() || sched.some(r => st.revisions[r.key] === todayISO());
+        return st.studyDate === tISO || sched.some(r => st.revisions[r.key] === tISO);
       }).length;
-      title   = 'Daily Action Analysis';
-      html    = '<div class="analysis-stat"><span>Pending Revisions Today</span><strong>' + dueCount + '</strong></div>' +
-                '<div class="analysis-stat"><span>Tasks Completed Today</span><strong>' + doneTodayCount + '</strong></div>';
-      insight = dueCount > 0
-        ? '🎯 Focus on clearing today\'s pending revisions before reading new topics.'
-        : '✅ Fully caught up. You may safely tackle new initial reads or custom sub-topics.';
+
+      // Recalibrate: if revisions are overdue, memory gaps are forming
+      const memoryRisk = overdueCount > 5 ? 'HIGH' : overdueCount > 0 ? 'MEDIUM' : 'LOW';
+      const riskColor  = overdueCount > 5 ? 'var(--red)' : overdueCount > 0 ? '#E67E22' : 'var(--green)';
+
+      title = 'Revision Engine · Live Status';
+      badge = dueCount > 0 ? '<span class="modal-badge red">' + dueCount + ' due</span>' : '<span class="modal-badge green">All clear</span>';
+      html  =
+        '<div class="rcal-grid">' +
+          '<div class="rcal-cell"><div class="rcal-num' + (dueCount>0?' rcal-red':'') + '">' + dueCount + '</div><div class="rcal-lbl">Due Today</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num' + (overdueCount>0?' rcal-red':'') + '">' + overdueCount + '</div><div class="rcal-lbl">Overdue Slots</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num rcal-green">' + doneTodayCount + '</div><div class="rcal-lbl">Done Today</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num" style="color:' + riskColor + '">' + memoryRisk + '</div><div class="rcal-lbl">Memory Risk</div></div>' +
+        '</div>' +
+        '<div class="rcal-pace-block">' +
+          '<div class="rcal-pace-row"><span>Spaced repetition slots pending</span><strong class="' + (dueCount>0?'rcal-red':'rcal-green') + '">' + dueCount + '</strong></div>' +
+          '<div class="rcal-pace-row"><span>Overdue beyond today</span><strong class="' + (overdueCount>0?'rcal-red':'rcal-green') + '">' + overdueCount + '</strong></div>' +
+        '</div>';
+      insight = overdueCount > 5
+        ? '🔴 ' + overdueCount + ' revision slots overdue. Topics are escaping long-term memory. Go to Backlog — do revisions before new reads.'
+        : overdueCount > 0
+        ? '🟡 ' + overdueCount + ' revision slots slightly overdue. Clear them today to keep memory network intact.'
+        : dueCount > 0
+        ? '🎯 ' + dueCount + ' revisions due today. Complete these first before any new initial reads.'
+        : '✅ Revision engine is healthy. All spaced repetition on schedule.';
     }
+
+    // ── COVERAGE ──────────────────────────────────────────────────────────
     else if (type === 'studied') {
       const totalTopics = DAYS_DATA.length;
       const studied     = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length;
-      const pct         = Math.round((studied/totalTopics)*100);
-      title   = 'Overall Study Coverage';
-      html    = '<div class="analysis-stat"><span>Topics Read</span><strong>' + studied + ' / ' + totalTopics + '</strong></div>' +
-                '<div class="analysis-stat"><span>Not Started</span><strong>' + (totalTopics - studied) + '</strong></div>' +
-                '<div class="analysis-stat"><span>Coverage</span><strong>' + pct + '%</strong></div>';
-      insight = bd.overdueTopics.length > 0
-        ? '🎯 ' + bd.overdueTopics.length + ' initial reads pending from past days. Halt forward progression and clear this backlog.'
-        : '✅ Initial reads are pacing well. Keep matching new reads to your phase schedule.';
+      const pct         = Math.round((studied / totalTopics) * 100);
+      const backlogCount = bd.overdueTopics.length;
+
+      // Per-phase breakdown
+      const allPhases = getActivePhases().map(normalizePhase);
+      const phaseBreakdown = allPhases.map(p => {
+        const r = computePhaseSchedule(p);
+        const pp = Math.round((r.studiedCount / Math.max(1, r.allTopics.length)) * 100);
+        return '<div class="rcal-phase-row" style="border-left:3px solid ' + p.color + '">' +
+          '<span style="color:' + p.color + ';font-weight:600">' + p.label + '</span>' +
+          '<span>' + r.studiedCount + '/' + r.allTopics.length + '</span>' +
+          '<span>' + pp + '%</span>' +
+          '<span class="' + (r.behind > 0 ? 'rcal-red' : 'rcal-green') + '">' + (r.behind > 0 ? '−'+r.behind+' behind' : '✓ on pace') + '</span>' +
+        '</div>';
+      }).join('');
+
+      title = 'Overall Coverage · Recalibrated';
+      badge = '<span class="modal-badge ' + (backlogCount > 0 ? 'red' : 'green') + '">' + pct + '% done</span>';
+      html  =
+        '<div class="rcal-prog-row"><span class="rcal-prog-label">Total Progress</span><span class="rcal-prog-val">' + pct + '%</span></div>' +
+        '<div class="rcal-bar-track"><div class="rcal-bar-fill" style="width:' + pct + '%;background:var(--burgundy)"></div></div>' +
+        '<div class="rcal-grid" style="margin-top:16px">' +
+          '<div class="rcal-cell"><div class="rcal-num">' + studied + '</div><div class="rcal-lbl">Read</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num">' + (totalTopics - studied) + '</div><div class="rcal-lbl">Remaining</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num' + (backlogCount>0?' rcal-red':'') + '">' + backlogCount + '</div><div class="rcal-lbl">Backlog</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num">' + totalTopics + '</div><div class="rcal-lbl">Total</div></div>' +
+        '</div>' +
+        '<div style="margin-top:16px;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Phase Breakdown</div>' +
+        phaseBreakdown;
+      insight = backlogCount > 0
+        ? '🔴 ' + backlogCount + ' topics should have been read by today. Recalibrated schedule is compressing them forward — check Backlog tab.'
+        : '✅ All initial reads on pace. ' + (totalTopics - studied) + ' topics remain across ' + allPhases.length + ' phase' + (allPhases.length>1?'s':'') + '.';
     }
+
+    // ── MEMORY / REVISIONS HEALTH ─────────────────────────────────────────
     else if (type === 'revisions') {
-      const totalRevDone = DAYS_DATA.reduce((acc,d) => acc + sched.filter(r => ensureDayState(d.id).revisions[r.key]).length, 0);
-      const totalOverdue = bd.pendingRevisions.length;
-      title   = 'Revision Health Check';
-      html    = '<div class="analysis-stat"><span>Total Revisions Logged</span><strong>' + totalRevDone + '</strong></div>' +
-                '<div class="analysis-stat"><span>Topics w/ Overdue Revisions</span><strong style="color:var(--red)">' + totalOverdue + '</strong></div>';
-      insight = totalOverdue > 0
-        ? '🎯 ' + totalOverdue + ' topics are leaking from your memory network. Open Backlog and clear these red alerts.'
-        : '✅ Spaced repetition engine is healthy. Memory retention is optimal.';
-    }
-    else if (type === 'phase') {
-      const phaseDaysLeft = phase ? Math.max(0, phase.days[1] - planDay) : 0;
-      if (phase && bd.phaseProgress) {
-        const topicsLeft   = bd.phaseProgress.total - bd.phaseProgress.studiedCount;
-        const requiredPace = phaseDaysLeft > 0 ? (topicsLeft / phaseDaysLeft).toFixed(1) : topicsLeft;
-        title = phase.label + ' Trajectory';
-        html  = '<div class="analysis-stat"><span>Phase Boundary</span><strong>Day ' + phase.days[0] + ' – ' + phase.days[1] + '</strong></div>' +
-                '<div class="analysis-stat"><span>Unread Topics in Phase</span><strong>' + topicsLeft + '</strong></div>' +
-                '<div class="analysis-stat"><span>Days Remaining</span><strong>' + phaseDaysLeft + '</strong></div>' +
-                '<div class="analysis-stat"><span>Required Pace</span><strong>' + requiredPace + ' topics / day</strong></div>';
-        insight = requiredPace > 2
-          ? '🎯 Falling behind phase schedule. Increase daily read volume to catch up.'
-          : '✅ Moving at a sustainable pace. Stick to the plan.';
-      }
+      const totalRevDone  = DAYS_DATA.reduce((acc,d) => acc + sched.filter(r => ensureDayState(d.id).revisions[r.key]).length, 0);
+      const totalPossible = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length * sched.length;
+      const totalOverdue  = bd.pendingRevisions.length;
+      const revPct        = totalPossible > 0 ? Math.round((totalRevDone / totalPossible) * 100) : 0;
+
+      // R1–R8 completion breakdown
+      const revBreakdown = sched.map(r => {
+        const done = DAYS_DATA.filter(d => ensureDayState(d.id).revisions[r.key]).length;
+        const possible = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate).length;
+        const p = possible > 0 ? Math.round((done/possible)*100) : 0;
+        return '<div class="rcal-rev-row">' +
+          '<span class="rcal-rev-key">' + r.label + '</span>' +
+          '<div class="rcal-rev-bar-wrap"><div class="rcal-rev-bar" style="width:' + p + '%"></div></div>' +
+          '<span class="rcal-rev-pct">' + done + '/' + possible + '</span>' +
+        '</div>';
+      }).join('');
+
+      title = 'Memory Network · Health Check';
+      badge = totalOverdue > 0 ? '<span class="modal-badge red">' + totalOverdue + ' leaking</span>' : '<span class="modal-badge green">Healthy</span>';
+      html  =
+        '<div class="rcal-grid">' +
+          '<div class="rcal-cell"><div class="rcal-num">' + totalRevDone + '</div><div class="rcal-lbl">Revisions Done</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num">' + totalPossible + '</div><div class="rcal-lbl">Total Possible</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num' + (totalOverdue>0?' rcal-red':' rcal-green') + '">' + totalOverdue + '</div><div class="rcal-lbl">Topics Leaking</div></div>' +
+          '<div class="rcal-cell"><div class="rcal-num">' + revPct + '%</div><div class="rcal-lbl">Rev. Coverage</div></div>' +
+        '</div>' +
+        '<div style="margin-top:16px;font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Spaced Repetition Ladder</div>' +
+        revBreakdown;
+      insight = totalOverdue > 5
+        ? '🔴 ' + totalOverdue + ' topics have revisions overdue — memory is degrading. Prioritise Backlog before new reads.'
+        : totalOverdue > 0
+        ? '🟡 ' + totalOverdue + ' topics leaking from memory. Clear their overdue revisions today.'
+        : '✅ Spaced repetition engine is fully healthy. All ' + totalRevDone + ' revisions are keeping pace.';
     }
 
     const mc = document.getElementById('modal-content');
     mc.innerHTML =
-      '<div class="modal-title">' + title + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-bottom:16px;text-transform:uppercase;letter-spacing:1px">Decision Analytics</div>' +
+      tabHtml +
+      '<div class="modal-title">' + title + (badge ? ' ' + badge : '') + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-bottom:16px;text-transform:uppercase;letter-spacing:1px">Live · Recalibrated After Last Action</div>' +
       html +
       '<div class="analysis-insight">' + insight + '</div>' +
       '<div class="modal-btn-row" style="margin-top:20px"><button class="btn-primary" onclick="App.closeModal()">Got it</button></div>';
@@ -1020,71 +1415,74 @@ const App = (() => {
     const el = document.getElementById('viewBacklog');
     if (!el) return;
     const { overdueTopics, pendingRevisions, phaseProgress } = getBacklogData();
-    const planDay      = getPlanDay();
-    const activePhases = getActivePhases();
+    const activePhases = getActivePhases().map(normalizePhase);
 
+    // Group overdue read topics by phase
     const byPhase = {};
-    overdueTopics.forEach(d => {
-      const phase = activePhases.map(normalizePhase).find(p => d.planDay >= p.days[0] && d.planDay <= p.days[1])
+    overdueTopics.forEach(item => {
+      const topic = item.day;
+      const phase = activePhases.find(p => p.sections && p.sections.includes(topic.sec))
                  || { label: 'Unassigned', color: '#888', id: 'other' };
-      if (!byPhase[phase.id]) byPhase[phase.id] = { phase: phase, topics: [] };
-      byPhase[phase.id].topics.push(d);
+      if (!byPhase[phase.id]) byPhase[phase.id] = { phase: phase, items: [] };
+      byPhase[phase.id].items.push(item);
     });
 
     const alertHtml = phaseProgress && phaseProgress.behind > 0 ?
       '<div class="backlog-alert">' +
         '<div class="ba-icon">⚠</div>' +
-        '<div class="ba-text"><strong>' + phaseProgress.behind + ' topic' + (phaseProgress.behind>1?'s':'') + ' behind</strong> in ' + phaseProgress.phase.label + '.<br>' +
-        'Studied: ' + phaseProgress.studiedCount + ' of ' + phaseProgress.total + '. Expected by now: ' + phaseProgress.expectedCount + '.</div>' +
+        '<div class="ba-text">' +
+          '<strong>' + phaseProgress.behind + ' topic' + (phaseProgress.behind > 1 ? 's' : '') + ' behind schedule</strong> in ' + phaseProgress.phase.label + '.<br>' +
+          'Read: ' + phaseProgress.studiedCount + ' of ' + phaseProgress.total + ' · ' +
+          'Expected by now: ' + phaseProgress.expectedCount + ' · ' +
+          'Pace needed: <strong>' + phaseProgress.topicsPerDay + '/day</strong>' +
+        '</div>' +
       '</div>'
     : phaseProgress ?
-      '<div class="backlog-ok">✓ On track — ' + phaseProgress.studiedCount + '/' + phaseProgress.total + ' topics done in current phase</div>'
+      '<div class="backlog-ok">✓ On track — ' + phaseProgress.studiedCount + '/' + phaseProgress.total + ' topics done in ' + phaseProgress.phase.label + '</div>'
     : '';
 
-    const phaseBacklogHtml = Object.values(byPhase).length > 0 ?
-      '<div class="section-title" style="margin-bottom:12px">Topics Not Started (Plan Day Passed) <span class="count-chip red">' + overdueTopics.length + '</span></div>' +
+    const readBacklogHtml = overdueTopics.length > 0 ?
+      '<div class="section-title" style="margin-bottom:12px">📚 Overdue Initial Reads <span class="count-chip red">' + overdueTopics.length + '</span></div>' +
       Object.values(byPhase).map(function(entry) {
-        const phase = entry.phase, topics = entry.topics;
+        const phase = entry.phase, items = entry.items;
         return '<div class="phase-backlog-section" style="border-left-color:' + phase.color + '">' +
           '<div class="pbl-header" style="background:' + phase.color + '15;color:' + phase.color + ';border-bottom-color:' + phase.color + '33">' +
-            phase.label + ' · ' + topics.length + ' overdue' +
+            phase.label + ' · ' + items.length + ' overdue reads' +
           '</div>' +
           '<div class="bl-list">' +
-            topics.map(d => {
-              const daysOverdue = planDay - d.planDay;
+            items.map(function(item) {
+              const d = item.day;
               return '<div class="bl-item">' +
                 '<div class="bl-id">' + formatDayId(d.id) + '</div>' +
                 '<div class="bl-topic" onclick="App.openTopicDetail(\'' + d.id + '\')">' + d.topic + '</div>' +
-                '<span style="font-size:10px;color:' + phase.color + ';font-weight:600;font-family:var(--mono);white-space:nowrap">' + daysOverdue + 'd late</span>' +
+                '<span style="font-size:10px;color:var(--red);font-weight:700;white-space:nowrap">' + item.daysLate + 'd late</span>' +
                 '<button class="bl-mark" onclick="App.showDateModal(\'' + d.id + '\',\'study\')">Mark Read</button>' +
               '</div>';
             }).join('') +
           '</div>' +
         '</div>';
       }).join('')
-    : overdueTopics.length === 0 ?
-      '<div class="backlog-ok" style="margin-bottom:16px">✓ All required plan-day topics started!</div>'
-    : '';
+    : '<div class="backlog-ok" style="margin-bottom:16px">✓ All scheduled reads are on time!</div>';
 
     const revBacklogHtml = pendingRevisions.length > 0 ?
-      '<div class="section-title" style="margin-bottom:12px;margin-top:' + (overdueTopics.length>0?'20px':'0') + '">Overdue Revisions <span class="count-chip red">' + pendingRevisions.length + '</span></div>' +
+      '<div class="section-title" style="margin-bottom:12px;margin-top:20px">🔁 Overdue Revisions <span class="count-chip red">' + pendingRevisions.length + '</span></div>' +
       '<div class="backlog-section"><div class="bl-list">' +
         pendingRevisions.map(function(item) {
-          const day = item.day, overdueRevs = item.overdueRevs;
-          const st       = ensureDayState(day.id);
-          const sched    = getEffectiveSchedule();
-          const nextOD   = sched.find(r => getRevStatus(day.id, r.key, st) === 'overdue');
+          const day = item.day;
+          const st  = ensureDayState(day.id);
+          const sched = getEffectiveSchedule();
+          const nextOD = sched.find(r => getRevStatus(day.id, r.key, st) === 'overdue');
           return '<div class="bl-item bl-overdue">' +
             '<div class="bl-id">' + formatDayId(day.id) + '</div>' +
             '<div class="bl-topic" onclick="App.openTopicDetail(\'' + day.id + '\')">' + day.topic + '</div>' +
-            '<span style="font-size:10px;color:var(--red);font-weight:700">' + overdueRevs + ' rev overdue</span>' +
+            '<span style="font-size:10px;color:var(--red);font-weight:700">' + item.overdueRevs + ' rev overdue</span>' +
             (nextOD ? '<button class="bl-mark" onclick="App.showDateModal(\'' + day.id + '\',\'' + nextOD.key + '\')">Mark ' + nextOD.key.toUpperCase() + '</button>' : '') +
           '</div>';
         }).join('') +
       '</div></div>'
     : '';
 
-    el.innerHTML = alertHtml + phaseBacklogHtml + revBacklogHtml +
+    el.innerHTML = alertHtml + readBacklogHtml + revBacklogHtml +
       (overdueTopics.length === 0 && pendingRevisions.length === 0
         ? '<div class="no-due">✓ No backlog — you\'re fully on track!</div>'
         : '');
