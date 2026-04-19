@@ -505,8 +505,8 @@ const App = (() => {
       });
     });
 
-    // Sort most overdue first
-    overdueTopics.sort((a, b) => b.daysLate - a.daysLate);
+    // Sort by plan order (serial sequence)
+    overdueTopics.sort((a, b) => (a.day.planDay || 9999) - (b.day.planDay || 9999));
 
     // Collect overdue revisions
     DAYS_DATA.forEach(d => {
@@ -676,7 +676,7 @@ const App = (() => {
     if (badge) badge.textContent = due > 0 ? due : '';
     const { overdueTopics, pendingRevisions } = getBacklogData();
     const bBadge = document.getElementById('badge-backlog');
-    if (bBadge) { const t = overdueTopics.length + pendingRevisions.length; bBadge.textContent = t > 0 ? t : ''; }
+    if (bBadge) { bBadge.textContent = overdueTopics.length > 0 ? overdueTopics.length : ''; }
   }
 
   // ── TODAY VIEW ────────────────────────────────────────────────────────────
@@ -739,11 +739,11 @@ const App = (() => {
     : '<div class="section-title" style="margin-top:24px">📖 Today\'s Read Targets</div>' +
       '<div class="no-due" style="background:var(--gold-light);border-color:#EDD894;color:var(--gold)">✓ No new reads scheduled for today</div>';
 
-    // Phase-focused hero stats
+    // Phase-focused hero stats — backlog uses overdueTopics.length (same source as badge)
     const phaseResult  = phase ? computePhaseSchedule(phase) : null;
     const phaseRead    = phaseResult ? phaseResult.studiedCount : 0;
     const phaseTotal   = phaseResult ? phaseResult.allTopics.length : 0;
-    const phaseBacklog = phaseResult ? phaseResult.behind : 0;
+    const phaseBacklog = getBacklogData().overdueTopics.length;  // single source of truth
     const phaseRemain  = phaseTotal - phaseRead;
     const newPace      = phaseResult && phaseDaysLeft > 0
       ? (phaseRemain / phaseDaysLeft).toFixed(1)
@@ -884,7 +884,7 @@ const App = (() => {
         const pct          = total > 0 ? Math.round((read / total) * 100) : 0;
         const barPct       = Math.min(100, pct);
 
-        title = phase.label + ' · Live Recalibration';
+        title = phase.label;
         badge = backlog > 0 ? '<span class="modal-badge red">' + backlog + ' behind</span>' :
                 ahead  > 0 ? '<span class="modal-badge green">+' + ahead + ' ahead</span>' :
                              '<span class="modal-badge green">On pace</span>';
@@ -976,7 +976,7 @@ const App = (() => {
       const memoryRisk = overdueCount > 5 ? 'HIGH' : overdueCount > 0 ? 'MEDIUM' : 'LOW';
       const riskColor  = overdueCount > 5 ? 'var(--red)' : overdueCount > 0 ? '#E67E22' : 'var(--green)';
 
-      title = 'Revision Engine · Live Status';
+      title = 'Revisions';
       badge = dueCount > 0 ? '<span class="modal-badge red">' + dueCount + ' due</span>' : '<span class="modal-badge green">All clear</span>';
       html  =
         '<div class="rcal-grid">' +
@@ -1018,7 +1018,7 @@ const App = (() => {
         '</div>';
       }).join('');
 
-      title = 'Overall Coverage · Recalibrated';
+      title = 'Coverage';
       badge = '<span class="modal-badge ' + (backlogCount > 0 ? 'red' : 'green') + '">' + pct + '% done</span>';
       html  =
         '<div class="rcal-prog-row"><span class="rcal-prog-label">Total Progress</span><span class="rcal-prog-val">' + pct + '%</span></div>' +
@@ -1055,7 +1055,7 @@ const App = (() => {
         '</div>';
       }).join('');
 
-      title = 'Memory Network · Health Check';
+      title = 'Memory';
       badge = totalOverdue > 0 ? '<span class="modal-badge red">' + totalOverdue + ' leaking</span>' : '<span class="modal-badge green">Healthy</span>';
       html  =
         '<div class="rcal-grid">' +
@@ -1077,7 +1077,7 @@ const App = (() => {
     mc.innerHTML =
       tabHtml +
       '<div class="modal-title">' + title + (badge ? ' ' + badge : '') + '</div>' +
-      '<div style="font-size:11px;color:var(--text3);margin-bottom:16px;text-transform:uppercase;letter-spacing:1px">Live · Recalibrated After Last Action</div>' +
+      
       html +
       '<div class="analysis-insight">' + insight + '</div>' +
       '<div class="modal-btn-row" style="margin-top:20px"><button class="btn-primary" onclick="App.closeModal()">Got it</button></div>';
