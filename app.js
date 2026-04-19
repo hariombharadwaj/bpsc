@@ -38,7 +38,15 @@ const App = (() => {
   // ── INIT ─────────────────────────────────────────────────────────────────
   async function init() {
     await openDB();
-    const saved = await loadFromDB();
+    let saved = await loadFromDB();
+
+    // Fallback: if IndexedDB empty, try localStorage backup
+    if (!saved) {
+      try {
+        const backup = localStorage.getItem('bpsc_v3_backup');
+        if (backup) { saved = JSON.parse(backup); console.warn('[BPSC] IndexedDB empty — restored from localStorage backup'); }
+      } catch(_) {}
+    }
 
     STATE  = (saved && saved.state)  ? saved.state  : buildFreshState();
     CONFIG = (saved && saved.config) ? Object.assign({}, buildDefaultConfig(), saved.config) : buildDefaultConfig();
@@ -59,8 +67,20 @@ const App = (() => {
       });
     }
 
+    // Remove topics the user previously deleted (so they don't reappear on reload)
+    if (saved && saved.deletedIds && Array.isArray(saved.deletedIds)) {
+      saved.deletedIds.forEach(id => {
+        const idx = DAYS_DATA.findIndex(d => String(d.id) === String(id));
+        if (idx > -1) DAYS_DATA.splice(idx, 1);
+        delete STATE[String(id)];
+      });
+    }
+
     // Restore ID counters
     if (saved && saved.idCounters) Object.assign(SECTION_ID_COUNTERS, saved.idCounters);
+
+    // Restore deleted IDs list
+    if (saved && saved.deletedIds) DELETED_IDS = saved.deletedIds;
 
     renderAll();
     updateUndoRedoBtns();
@@ -121,16 +141,32 @@ const App = (() => {
     });
   }
 
+  // Track deleted built-in topic IDs so they don't reappear on reload
+  let DELETED_IDS = [];
+
   function saveToDB() {
-    if (!db) return;
     const customTopics = DAYS_DATA.filter(d => d.custom);
     const payload = deepClone({
-      state: STATE, config: CONFIG, customTopics,
+      state: STATE,
+      config: CONFIG,
+      customTopics,
+      deletedIds: DELETED_IDS,
       idCounters: typeof SECTION_ID_COUNTERS !== 'undefined' ? SECTION_ID_COUNTERS : {},
+      savedAt: new Date().toISOString(),
     });
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(payload, KEY);
+
+    // Save to localStorage FIRST (most reliable across sessions)
     try { localStorage.setItem('bpsc_v3_backup', JSON.stringify(payload)); } catch(_){}
+    try { localStorage.setItem('bpsc_v3_backup2', JSON.stringify(payload)); } catch(_){} // second copy
+
+    // Save to IndexedDB
+    if (db) {
+      try {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(payload, KEY);
+        tx.onerror = () => console.error('[BPSC] IndexedDB save failed');
+      } catch(e) { console.error('[BPSC] IndexedDB error:', e); }
+    }
   }
 
   // ── UNDO / REDO ──────────────────────────────────────────────────────────
@@ -719,7 +755,7 @@ const App = (() => {
         : '') +
         '<div class="dc-footer-btns">' +
           '<button class="dc-footer-btn" onclick="App.showAddExtraTopicModal(\'' + day.id + '\')">+ Sub-topic</button>' +
-          '<button class="dc-footer-btn danger" onclick="App.confirmHideDay(\'' + day.id + '\')">🗑 Delete</button>' +
+          '<button class="dc-footer-btn danger" onclick="App.confirmHideDay(\'' + day.id + '\')">🗑 Delete Topic</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -1147,7 +1183,7 @@ const App = (() => {
       confirm: 'Reset Everything', danger: true,
       onConfirm: function() {
         STATE   = buildFreshState();
-        HISTORY = []; FUTURE = [];
+        HISTORY = []; FUTURE = []; DELETED_IDS = [];
         const toRemove = DAYS_DATA.filter(d => d.custom).map(d => d.id);
         toRemove.forEach(id => { const idx = DAYS_DATA.findIndex(d => d.id === id); if (idx > -1) DAYS_DATA.splice(idx,1); });
         saveToDB(); renderAll(); closeModal(); toast('Data reset');
@@ -1365,14 +1401,23 @@ const App = (() => {
     const topicName = day ? day.topic : dayId;
     showModal({
       title: 'Delete this topic?',
-      sub: '"' + topicName + '" will be permanently deleted including all study dates and revisions.',
+      sub: '"' + topicName + '" will be permanently deleted. Plan day numbers will be reassigned automatically.',
       confirm: 'Delete', danger: true,
       onConfirm: function() {
         snapshot();
         const idx = DAYS_DATA.findIndex(d => String(d.id) === String(dayId));
         if (idx > -1) DAYS_DATA.splice(idx, 1);
         delete STATE[String(dayId)];
-        saveToDB(); closeModal(); renderAll(); toast('Topic deleted');
+        // Track deleted ID so it does not reappear on next reload
+        if (!DELETED_IDS.includes(String(dayId))) DELETED_IDS.push(String(dayId));
+
+        // Reassign planDay numbers sequentially — no gaps
+        // Group by section order, then renumber by existing order within each sec
+        // Actually: renumber ALL topics that have planDay by their current sorted order
+        const withPlanDay = DAYS_DATA.filter(d => d.planDay != null).sort((a, b) => a.planDay - b.planDay);
+        withPlanDay.forEach((d, i) => { d.planDay = i + 1; });
+
+        saveToDB(); closeModal(); renderAll(); toast('✓ Topic deleted & days renumbered');
       }
     });
   }
