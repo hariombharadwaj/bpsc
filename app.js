@@ -399,19 +399,25 @@ const App = (() => {
       };
     });
 
-    // Unread topics: assign from today forward in batches of topicsPerDay
-    // startDate = max(today, phaseStartDate)
+    // Unread topics: use ORIGINAL expected date (position in full topic list from phase start).
+    // This correctly flags topics that should have been read by now as 'overdue'.
+    // recalDate = compressed from today, used only for Today view scheduling.
     const assignStartDate = tISO >= phaseStartDate ? tISO : phaseStartDate;
 
-    unreadTopics.forEach((topic, idx) => {
-      const dayOffset    = Math.floor(idx / topicsPerDay);
-      const assignedDate = addDays(assignStartDate, dayOffset);
-      const isPast       = assignedDate < tISO;
-      const isToday_     = assignedDate === tISO;
-      const daysLate     = isPast ? daysDiff(assignedDate, tISO) : 0;
+    allTopics.forEach((topic, globalIdx) => {
+      if (ensureDayState(topic.id).studyDate) return; // already done
+
+      const originalExpectedDate = addDays(phaseStartDate, Math.floor(globalIdx / topicsPerDay));
+      const unreadIdx  = unreadTopics.indexOf(topic);
+      const recalDate  = addDays(assignStartDate, Math.floor(unreadIdx / topicsPerDay));
+
+      const isPast   = originalExpectedDate < tISO;
+      const isToday_ = originalExpectedDate === tISO;
+      const daysLate = isPast ? daysDiff(originalExpectedDate, tISO) : 0;
 
       assignments[String(topic.id)] = {
-        assignedDate,
+        assignedDate: isPast || isToday_ ? originalExpectedDate : recalDate,
+        recalDate,
         status: isPast ? 'overdue' : isToday_ ? 'today' : 'upcoming',
         daysLate,
       };
@@ -441,14 +447,16 @@ const App = (() => {
     };
   }
 
-  // Get today's assigned unread topics for Today view
+  // Get today's assigned unread topics for Today view — uses recalDate (compressed schedule)
   function getTodayTargets() {
     const tISO    = todayISO();
     const targets = [];
     getActivePhases().map(normalizePhase).forEach(phase => {
       const { assignments } = computePhaseSchedule(phase);
       Object.entries(assignments).forEach(([id, info]) => {
-        if (info.assignedDate === tISO && info.status === 'today') {
+        // Show topics whose recalibrated date is today (includes backlog recovery topics)
+        const schedDate = info.recalDate || info.assignedDate;
+        if (schedDate === tISO && info.status !== 'done') {
           const topic = DAYS_DATA.find(d => String(d.id) === String(id));
           if (topic) targets.push({ topic, info });
         }
@@ -457,7 +465,7 @@ const App = (() => {
     return targets;
   }
 
-  // Get upcoming unread topics (next few days after today)
+  // Get upcoming unread topics (next few days after today) — uses recalDate
   function getUpcomingTargets() {
     const tISO    = todayISO();
     const upcoming = [];
@@ -465,8 +473,11 @@ const App = (() => {
       const { assignments } = computePhaseSchedule(phase);
       Object.entries(assignments).forEach(([id, info]) => {
         if (info.status === 'upcoming') {
-          const topic = DAYS_DATA.find(d => String(d.id) === String(id));
-          if (topic) upcoming.push({ topic, info });
+          const schedDate = info.recalDate || info.assignedDate;
+          if (schedDate > tISO) {
+            const topic = DAYS_DATA.find(d => String(d.id) === String(id));
+            if (topic) upcoming.push({ topic, info: { ...info, assignedDate: schedDate } });
+          }
         }
       });
     });
@@ -700,9 +711,6 @@ const App = (() => {
     // Topics studied today
     const studiedToday  = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate === tISO);
 
-    // Upcoming targets (next few days)
-    const upcomingTargets = getUpcomingTargets();
-
     const phaseHtml = phase ? (
       '<div class="plan-bar">' +
         '<span class="plan-phase-tag" style="background:' + phase.color + '22;color:' + phase.color + ';border:1px solid ' + phase.color + '44">' + phase.label + '</span>' +
@@ -731,39 +739,33 @@ const App = (() => {
     : '<div class="section-title" style="margin-top:24px">📖 Today\'s Read Targets</div>' +
       '<div class="no-due" style="background:var(--gold-light);border-color:#EDD894;color:var(--gold)">✓ No new reads scheduled for today</div>';
 
-    // Upcoming section (next 5 topics)
-    const upcomingHtml = upcomingTargets.length > 0 ?
-      '<div class="section-title" style="margin-top:24px">🗓 Coming Up Next</div>' +
-      '<div class="rev-due-list">' +
-        upcomingTargets.map(({ topic, info }) =>
-          '<div class="rev-due-card" style="opacity:0.7">' +
-            '<div class="rdc-day" style="background:var(--surface2)">' + fmtDisplay(info.assignedDate) + '</div>' +
-            '<div class="rdc-topic">' +
-              topic.topic +
-              '<small>' + (SECTIONS_META[topic.sec] ? SECTIONS_META[topic.sec].label : '') + '</small>' +
-            '</div>' +
-          '</div>'
-        ).join('') +
-      '</div>'
-    : '';
+    // Phase-focused hero stats
+    const phaseResult  = phase ? computePhaseSchedule(phase) : null;
+    const phaseRead    = phaseResult ? phaseResult.studiedCount : 0;
+    const phaseTotal   = phaseResult ? phaseResult.allTopics.length : 0;
+    const phaseBacklog = phaseResult ? phaseResult.behind : 0;
+    const phaseRemain  = phaseTotal - phaseRead;
+    const newPace      = phaseResult && phaseDaysLeft > 0
+      ? (phaseRemain / phaseDaysLeft).toFixed(1)
+      : phaseRemain;
 
     el.innerHTML = phaseHtml +
       '<div class="today-hero">' +
-        '<div class="hero-card accent" onclick="App.showAnalysisModal(\'due\')">' +
-          '<div class="hero-num">' + dueItems.length + '</div>' +
-          '<div class="hero-label">Revisions Due</div>' +
+        '<div class="hero-card accent" onclick="App.showAnalysisModal(\'phase\')">' +
+          '<div class="hero-num">' + phaseRead + '<span style="font-size:14px;opacity:0.7">/' + phaseTotal + '</span></div>' +
+          '<div class="hero-label">Phase Read</div>' +
         '</div>' +
-        '<div class="hero-card" onclick="App.showAnalysisModal(\'studied\')">' +
-          '<div class="hero-num">' + studied + '</div>' +
-          '<div class="hero-label">Studied</div>' +
-        '</div>' +
-        '<div class="hero-card" onclick="App.showAnalysisModal(\'revisions\')">' +
-          '<div class="hero-num">' + totalRevDone + '</div>' +
-          '<div class="hero-label">Revisions</div>' +
+        '<div class="hero-card' + (phaseBacklog > 0 ? ' hero-card-warn' : '') + '" onclick="App.showAnalysisModal(\'phase\')">' +
+          '<div class="hero-num' + (phaseBacklog > 0 ? ' hero-num-red' : '') + '">' + phaseBacklog + '</div>' +
+          '<div class="hero-label">Backlog</div>' +
         '</div>' +
         '<div class="hero-card" onclick="App.showAnalysisModal(\'phase\')">' +
-          '<div class="hero-num">' + phaseDaysLeft + '</div>' +
-          '<div class="hero-label">Phase Days Left</div>' +
+          '<div class="hero-num">' + newPace + '</div>' +
+          '<div class="hero-label">Topics/Day</div>' +
+        '</div>' +
+        '<div class="hero-card' + (dueItems.length > 0 ? ' hero-card-warn' : '') + '" onclick="App.showAnalysisModal(\'due\')">' +
+          '<div class="hero-num' + (dueItems.length > 0 ? ' hero-num-red' : '') + '">' + dueItems.length + '</div>' +
+          '<div class="hero-label">Rev. Due</div>' +
         '</div>' +
       '</div>' +
 
@@ -795,10 +797,7 @@ const App = (() => {
             '</div>'
           ).join('') +
         '</div>'
-      : '') +
-
-      // Upcoming
-      upcomingHtml;
+      : '');
   }
 
   function renderDueCard(item) {

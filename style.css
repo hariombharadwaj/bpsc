@@ -553,3 +553,7 @@ body.sidebar-closed #sidebar { display: none; }
   .modal-tab { padding: 4px 9px; font-size: 10px; }
   .rcal-phase-row { font-size: 11px; flex-wrap: wrap; }
 }
+
+/* Phase-focused hero card variants */
+.hero-card-warn { background: var(--red-light); border-color: var(--red); }
+.hero-num-red   { color: var(--red) !important; }
