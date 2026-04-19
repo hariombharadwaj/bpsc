@@ -404,10 +404,16 @@ const App = (() => {
     // recalDate = compressed from today, used only for Today view scheduling.
     const assignStartDate = tISO >= phaseStartDate ? tISO : phaseStartDate;
 
-    allTopics.forEach((topic, globalIdx) => {
+    // Sort allTopics by planDay so position is stable after add/delete
+    const sortedTopics = allTopics.slice().sort((a, b) => (a.planDay || 9999) - (b.planDay || 9999));
+    const phaseOffset  = phase.days[0] - 1; // planDay of first topic in phase
+
+    sortedTopics.forEach((topic, globalIdx) => {
       if (ensureDayState(topic.id).studyDate) return; // already done
 
-      const originalExpectedDate = addDays(phaseStartDate, Math.floor(globalIdx / topicsPerDay));
+      // Use planDay-relative position as stable anchor (survives add/delete/renumber)
+      const stableIdx            = (topic.planDay != null) ? (topic.planDay - phaseOffset - 1) : globalIdx;
+      const originalExpectedDate = addDays(phaseStartDate, Math.floor(Math.max(0, stableIdx) / topicsPerDay));
       const unreadIdx  = unreadTopics.indexOf(topic);
       const recalDate  = addDays(assignStartDate, Math.floor(unreadIdx / topicsPerDay));
 
@@ -1456,6 +1462,7 @@ const App = (() => {
                 '<div class="bl-topic" onclick="App.openTopicDetail(\'' + d.id + '\')">' + d.topic + '</div>' +
                 '<span style="font-size:10px;color:var(--red);font-weight:700;white-space:nowrap">' + item.daysLate + 'd late</span>' +
                 '<button class="bl-mark" onclick="App.showDateModal(\'' + d.id + '\',\'study\')">Mark Read</button>' +
+                '<button class="bl-delete" onclick="App.confirmHideDay(\'' + d.id + '\')" title="Delete topic">🗑</button>' +
               '</div>';
             }).join('') +
           '</div>' +

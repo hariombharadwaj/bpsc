@@ -557,3 +557,17 @@ body.sidebar-closed #sidebar { display: none; }
 /* Phase-focused hero card variants */
 .hero-card-warn { background: var(--red-light); border-color: var(--red); }
 .hero-num-red   { color: var(--red) !important; }
+
+/* Delete button in backlog list */
+.bl-delete {
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.bl-delete:hover { background: var(--red-light); }
