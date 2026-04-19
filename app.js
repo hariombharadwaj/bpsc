@@ -719,7 +719,7 @@ const App = (() => {
         : '') +
         '<div class="dc-footer-btns">' +
           '<button class="dc-footer-btn" onclick="App.showAddExtraTopicModal(\'' + day.id + '\')">+ Sub-topic</button>' +
-          (day.custom ? '<button class="dc-footer-btn danger" onclick="App.confirmHideDay(\'' + day.id + '\')">Remove</button>' : '') +
+          '<button class="dc-footer-btn danger" onclick="App.confirmHideDay(\'' + day.id + '\')">🗑 Delete</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -1361,15 +1361,18 @@ const App = (() => {
   }
 
   function confirmHideDay(dayId) {
+    const day = DAYS_DATA.find(d => String(d.id) === String(dayId));
+    const topicName = day ? day.topic : dayId;
     showModal({
-      title: 'Remove this topic?', sub: 'Custom topic will be permanently deleted.',
-      confirm: 'Remove', danger: true,
+      title: 'Delete this topic?',
+      sub: '"' + topicName + '" will be permanently deleted including all study dates and revisions.',
+      confirm: 'Delete', danger: true,
       onConfirm: function() {
         snapshot();
         const idx = DAYS_DATA.findIndex(d => String(d.id) === String(dayId));
         if (idx > -1) DAYS_DATA.splice(idx, 1);
         delete STATE[String(dayId)];
-        saveToDB(); closeModal(); renderAll(); toast('Topic removed');
+        saveToDB(); closeModal(); renderAll(); toast('Topic deleted');
       }
     });
   }
