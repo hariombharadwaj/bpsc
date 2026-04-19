@@ -399,31 +399,36 @@ const App = (() => {
       };
     });
 
-    // Unread topics: use ORIGINAL expected date (position in full topic list from phase start).
-    // This correctly flags topics that should have been read by now as 'overdue'.
-    // recalDate = compressed from today, used only for Today view scheduling.
+    // Unread topics: ALWAYS recalibrate from today using remaining days in phase
+    // This means:
+    //   - Fresh install Day 1 → all topics assigned future dates → zero backlog
+    //   - As days pass without reading → today's assigned topics become backlog
+    //   - Mark a topic read → remaining topics recalibrate from today → pace adjusts
+    //   - Delete a topic → fewer topics, pace adjusts, no ghost counts
+
     const assignStartDate = tISO >= phaseStartDate ? tISO : phaseStartDate;
 
-    // Sort allTopics by planDay so position is stable after add/delete
-    const sortedTopics = allTopics.slice().sort((a, b) => (a.planDay || 9999) - (b.planDay || 9999));
-    const phaseOffset  = phase.days[0] - 1; // planDay of first topic in phase
+    // Remaining days in phase from today (minus buffer for R3 to complete)
+    const phaseEndDate_   = getPlanDateForDay(phase.days[1]);
+    const daysLeftInPhase = Math.max(1, daysDiff(assignStartDate, phaseEndDate_) - buffer);
 
-    sortedTopics.forEach((topic, globalIdx) => {
-      if (ensureDayState(topic.id).studyDate) return; // already done
+    // Recalibrated pace: based on UNREAD topics vs remaining days
+    const recalTopicsPerDay = Math.ceil(unreadTopics.length / daysLeftInPhase);
+    const finalTopicsPerDay = Math.max(topicsPerDay, recalTopicsPerDay); // never go slower than original pace
 
-      // Use planDay-relative position as stable anchor (survives add/delete/renumber)
-      const stableIdx            = (topic.planDay != null) ? (topic.planDay - phaseOffset - 1) : globalIdx;
-      const originalExpectedDate = addDays(phaseStartDate, Math.floor(Math.max(0, stableIdx) / topicsPerDay));
-      const unreadIdx  = unreadTopics.indexOf(topic);
-      const recalDate  = addDays(assignStartDate, Math.floor(unreadIdx / topicsPerDay));
+    // Sort unread topics by planDay for stable serial order
+    const sortedUnread = unreadTopics.slice().sort((a, b) => (a.planDay || 9999) - (b.planDay || 9999));
 
-      const isPast   = originalExpectedDate < tISO;
-      const isToday_ = originalExpectedDate === tISO;
-      const daysLate = isPast ? daysDiff(originalExpectedDate, tISO) : 0;
+    sortedUnread.forEach((topic, idx) => {
+      const dayOffset    = Math.floor(idx / finalTopicsPerDay);
+      const assignedDate = addDays(assignStartDate, dayOffset);
+      const isPast       = assignedDate < tISO;
+      const isToday_     = assignedDate === tISO;
+      const daysLate     = isPast ? daysDiff(assignedDate, tISO) : 0;
 
       assignments[String(topic.id)] = {
-        assignedDate: isPast || isToday_ ? originalExpectedDate : recalDate,
-        recalDate,
+        assignedDate,
+        recalDate: assignedDate,
         status: isPast ? 'overdue' : isToday_ ? 'today' : 'upcoming',
         daysLate,
       };
@@ -431,10 +436,7 @@ const App = (() => {
 
     // Phase progress stats
     const studiedCount  = readTopics.length;
-    const expectedByNow = allTopics.filter(d => {
-      const a = assignments[String(d.id)];
-      return a && a.assignedDate <= tISO;
-    }).length;
+    const expectedByNow = Object.values(assignments).filter(a => a.assignedDate <= tISO).length;
     const behind = Math.max(0, expectedByNow - studiedCount);
 
     return {
