@@ -651,6 +651,11 @@ const App = (() => {
       if (currentView === 'settings') renderSettingsView();
       if (currentView === 'backlog')  renderBacklogView();
     } catch(e) { console.error('renderView:', e); }
+    // Always re-render backlog in background so badge/count stays in sync
+    // even when user is on a different view
+    try {
+      if (currentView !== 'backlog') renderBacklogView();
+    } catch(e) { console.error('renderBacklogBg:', e); }
     try { updateBadges(); } catch(e) { console.error('updateBadges:', e); }
     try { updatePageSub(); } catch(e) { console.error('updatePageSub:', e); }
   }
@@ -1438,7 +1443,7 @@ const App = (() => {
         '<div class="ba-text">' +
           '<strong>' + phaseProgress.behind + ' topic' + (phaseProgress.behind > 1 ? 's' : '') + ' behind schedule</strong> in ' + phaseProgress.phase.label + '.<br>' +
           'Read: ' + phaseProgress.studiedCount + ' of ' + phaseProgress.total + ' · ' +
-          'Expected by now: ' + phaseProgress.expectedCount + ' · ' +
+          'Expected by now: ' + phaseProgress.expectedByNow + ' · ' +
           'Pace needed: <strong>' + phaseProgress.topicsPerDay + '/day</strong>' +
         '</div>' +
       '</div>'
