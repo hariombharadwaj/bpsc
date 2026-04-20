@@ -571,3 +571,27 @@ body.sidebar-closed #sidebar { display: none; }
   transition: background 0.15s;
 }
 .bl-delete:hover { background: var(--red-light); }
+
+/* Topic notes display in card body */
+.topic-notes-box {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  background: var(--gold-light);
+  border: 1px solid #EDD894;
+  border-left: 3px solid var(--gold);
+  border-radius: var(--radius-sm);
+}
+.topic-notes-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  margin-bottom: 6px;
+}
+.topic-notes-text {
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}

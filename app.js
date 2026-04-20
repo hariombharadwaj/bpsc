@@ -1160,7 +1160,14 @@ const App = (() => {
             ).join('') +
           '</div>'
         : '') +
+        (st.notes && st.notes.trim() ?
+          '<div class="topic-notes-box">' +
+            '<div class="topic-notes-label">📝 Notes</div>' +
+            '<div class="topic-notes-text">' + st.notes + '</div>' +
+          '</div>'
+        : '') +
         '<div class="dc-footer-btns">' +
+          '<button class="dc-footer-btn" onclick="App.showEditTopicModal(\'' + day.id + '\')">✏️ Edit</button>' +
           '<button class="dc-footer-btn" onclick="App.showAddExtraTopicModal(\'' + day.id + '\')">+ Sub-topic</button>' +
           '<button class="dc-footer-btn danger" onclick="App.confirmHideDay(\'' + day.id + '\')">🗑 Delete Topic</button>' +
         '</div>' +
@@ -1807,6 +1814,54 @@ const App = (() => {
     });
   }
 
+  // ── EDIT TOPIC ────────────────────────────────────────────────────────────
+  function showEditTopicModal(dayId) {
+    const day = DAYS_DATA.find(d => String(d.id) === String(dayId));
+    if (!day) return;
+    const st = ensureDayState(dayId);
+    const mc = document.getElementById('modal-content');
+    mc.innerHTML =
+      '<div class="modal-title">Edit Topic</div>' +
+      '<div class="modal-sub">' + formatDayId(dayId) + ' · ' + (SECTIONS_META[day.sec] ? SECTIONS_META[day.sec].label : '') + '</div>' +
+      '<div class="date-input-group">' +
+        '<label>Topic Name</label>' +
+        '<input type="text" id="editTopicName" value="' + day.topic.replace(/"/g, '&quot;') + '" ' +
+          'style="padding:10px 14px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:14px;width:100%;background:var(--surface2);color:var(--text);outline:none" />' +
+      '</div>' +
+      '<div class="date-input-group">' +
+        '<label>Brief Description / Notes</label>' +
+        '<textarea id="editTopicNotes" rows="4" placeholder="Add your notes, key points, or brief description here..." ' +
+          'style="padding:10px 14px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px;width:100%;background:var(--surface2);color:var(--text);outline:none;resize:vertical;font-family:var(--font);line-height:1.6">' +
+          (st.notes || '') +
+        '</textarea>' +
+      '</div>' +
+      '<div class="modal-btn-row">' +
+        '<button class="btn-secondary" onclick="App.closeModal()">Cancel</button>' +
+        '<button class="btn-primary" onclick="App.confirmEditTopic(\'' + dayId + '\')">Save</button>' +
+      '</div>';
+    document.getElementById('modal-overlay').classList.add('open');
+    setTimeout(function() { const i = document.getElementById('editTopicName'); if(i) i.focus(); }, 100);
+  }
+
+  function confirmEditTopic(dayId) {
+    const nameInput  = document.getElementById('editTopicName');
+    const notesInput = document.getElementById('editTopicNotes');
+    const newName    = nameInput  ? nameInput.value.trim()  : '';
+    const newNotes   = notesInput ? notesInput.value.trim() : '';
+
+    if (!newName) { toast('Topic name cannot be empty'); return; }
+
+    snapshot();
+    // Update topic name in DAYS_DATA
+    const day = DAYS_DATA.find(d => String(d.id) === String(dayId));
+    if (day) day.topic = newName;
+
+    // Save notes in STATE
+    ensureDayState(dayId).notes = newNotes;
+
+    saveToDB(); closeModal(); renderAll(); toast('✓ Topic updated');
+  }
+
   function confirmHideDay(dayId) {
     const day = DAYS_DATA.find(d => String(d.id) === String(dayId));
     const topicName = day ? day.topic : dayId;
@@ -1905,6 +1960,7 @@ const App = (() => {
     showAddTopicModal, confirmAddTopic,
     showAddExtraTopicModal, confirmAddExtra,
     confirmRemoveExtra, confirmHideDay,
+    showEditTopicModal, confirmEditTopic,
     scheduleNextDay,
     saveSchedule, resetSchedule, confirmResetAll,
     exportData, importData,
