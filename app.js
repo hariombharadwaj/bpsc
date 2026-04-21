@@ -660,6 +660,13 @@ const App = (() => {
     } catch(e) { console.error('renderBacklogBg:', e); }
     try { updateBadges(); } catch(e) { console.error('updateBadges:', e); }
     try { updatePageSub(); } catch(e) { console.error('updatePageSub:', e); }
+    try { updateVersionTag(); } catch(e) {}
+  }
+
+  // Update the sidebar version tag to always show live topic count
+  function updateVersionTag() {
+    const el = document.getElementById('versionTag');
+    if (el) el.textContent = 'v3.2 · ' + DAYS_DATA.length + ' Topics';
   }
 
   function renderCurrentView() {
@@ -718,9 +725,6 @@ const App = (() => {
       });
     });
 
-    // Today's initial read targets (assigned by phase scheduler for today)
-    const todayTargets  = getTodayTargets();
-
     // Topics studied today
     const studiedToday  = DAYS_DATA.filter(d => ensureDayState(d.id).studyDate === tISO);
 
@@ -732,25 +736,7 @@ const App = (() => {
       '</div>'
     ) : '';
 
-    // Today's read targets section
-    const todayTargetsHtml = todayTargets.length > 0 ?
-      '<div class="section-title" style="margin-top:24px">📖 Today\'s Read Targets <span class="count-chip orange">' + todayTargets.length + '</span></div>' +
-      '<div class="rev-due-list">' +
-        todayTargets.map(({ topic }) =>
-          '<div class="rev-due-card" style="border-left:3px solid var(--gold)">' +
-            '<div class="rdc-day">' + formatDayId(topic.id) + '</div>' +
-            '<div class="rdc-topic" onclick="App.openTopicDetail(\'' + topic.id + '\')">' +
-              topic.topic +
-              '<small>' + (SECTIONS_META[topic.sec] ? SECTIONS_META[topic.sec].label : '') + ' · Scheduled for today</small>' +
-            '</div>' +
-            '<div class="rdc-actions">' +
-              '<button class="bl-mark" onclick="App.showDateModal(\'' + topic.id + '\',\'study\')">Mark Read</button>' +
-            '</div>' +
-          '</div>'
-        ).join('') +
-      '</div>'
-    : '<div class="section-title" style="margin-top:24px">📖 Today\'s Read Targets</div>' +
-      '<div class="no-due" style="background:var(--gold-light);border-color:#EDD894;color:var(--gold)">✓ No new reads scheduled for today</div>';
+    // Today's Read Targets section removed per user request
 
     // Phase-focused hero stats — backlog uses overdueTopics.length (same source as badge)
     const phaseResult  = phase ? computePhaseSchedule(phase) : null;
@@ -790,9 +776,6 @@ const App = (() => {
         '<div class="section-title">🔁 Revisions Due</div>' +
         '<div class="no-due">✓ No revisions due today — well done!</div>'
       ) +
-
-      // Today's read targets
-      todayTargetsHtml +
 
       // Studied today
       (studiedToday.length > 0 ?
@@ -1744,10 +1727,17 @@ const App = (() => {
 
   // ── ADD TOPIC / EXTRA ─────────────────────────────────────────────────────
   function showAddTopicModal(sec) {
+    const secLabel = SECTIONS_META[sec] ? SECTIONS_META[sec].label : sec;
     const mc = document.getElementById('modal-content');
     mc.innerHTML =
-      '<div class="modal-title">Add Topic to ' + SECTIONS_META[sec].label + '</div>' +
-      '<div class="modal-sub">Will be numbered sequentially in this section</div>' +
+      '<div class="modal-title">Add Topic</div>' +
+      '<div class="modal-sub">' +
+        'Adding to: <strong style="color:var(--burgundy)">' + secLabel + '</strong><br>' +
+        '<span style="font-size:11px;color:var(--text3);line-height:1.6;display:block;margin-top:4px">' +
+          '⚠ This topic is <strong>global</strong> — it will appear in All Topics, the ' + secLabel + ' section, and Backlog if overdue. ' +
+          'Deleting it from anywhere removes it everywhere.' +
+        '</span>' +
+      '</div>' +
       '<div class="date-input-group">' +
         '<label>Topic Name</label>' +
         '<input type="text" id="newTopicInput" placeholder="Enter topic name..." style="padding:10px 14px;border:1.5px solid var(--border2);border-radius:var(--radius-sm);font-size:14px;width:100%;background:var(--surface2);color:var(--text);outline:none" />' +
@@ -1771,8 +1761,12 @@ const App = (() => {
     const customId = 'c_' + sec + '_' + seqNum;
     DAYS_DATA.push({ id: customId, sec: sec, topic: topic, custom: true, seqNum: seqNum, planDay: null });
     STATE[customId] = { studyDate: null, revisions: initRevs(), extraTopics: [], notes: '' };
-    saveToDB(); closeModal(); renderAll();
-    toast('Topic added as #' + seqNum);
+
+    // Full save + render — cascades to hero, badges, backlog, sidebar, version tag
+    saveToDB();
+    closeModal();
+    renderAll();
+    toast('✓ Topic added to ' + (SECTIONS_META[sec] ? SECTIONS_META[sec].label : sec));
   }
 
   function showAddExtraTopicModal(dayId) {
@@ -1865,25 +1859,37 @@ const App = (() => {
   function confirmHideDay(dayId) {
     const day = DAYS_DATA.find(d => String(d.id) === String(dayId));
     const topicName = day ? day.topic : dayId;
+    const secLabel  = day && SECTIONS_META[day.sec] ? SECTIONS_META[day.sec].label : '';
     showModal({
       title: 'Delete this topic?',
-      sub: '"' + topicName + '" will be permanently deleted. Plan day numbers will be reassigned automatically.',
-      confirm: 'Delete', danger: true,
+      sub: '"' + topicName + '"' + (secLabel ? ' (' + secLabel + ')' : '') +
+           ' will be permanently deleted from ALL views — subject list, All Topics, Backlog, and Today. ' +
+           'This cannot be undone (use Undo button immediately if needed).',
+      confirm: 'Delete Everywhere', danger: true,
       onConfirm: function() {
         snapshot();
-        const idx = DAYS_DATA.findIndex(d => String(d.id) === String(dayId));
-        if (idx > -1) DAYS_DATA.splice(idx, 1);
-        delete STATE[String(dayId)];
-        // Track deleted ID so it does not reappear on next reload
-        if (!DELETED_IDS.includes(String(dayId))) DELETED_IDS.push(String(dayId));
+        const sid = String(dayId);
 
-        // Reassign planDay numbers sequentially — no gaps
-        // Group by section order, then renumber by existing order within each sec
-        // Actually: renumber ALL topics that have planDay by their current sorted order
+        // 1. Remove from DAYS_DATA (single source of truth)
+        const idx = DAYS_DATA.findIndex(d => String(d.id) === sid);
+        if (idx > -1) DAYS_DATA.splice(idx, 1);
+
+        // 2. Remove from STATE so revisions/study date are gone
+        delete STATE[sid];
+
+        // 3. Track deleted ID so it never reappears on reload
+        if (!DELETED_IDS.includes(sid)) DELETED_IDS.push(sid);
+
+        // 4. Renumber planDay for remaining topics with planDays (no gaps)
         const withPlanDay = DAYS_DATA.filter(d => d.planDay != null).sort((a, b) => a.planDay - b.planDay);
         withPlanDay.forEach((d, i) => { d.planDay = i + 1; });
 
-        saveToDB(); closeModal(); renderAll(); toast('✓ Topic deleted & days renumbered');
+        // 5. Save + full re-render cascades to: hero counts, backlog view,
+        //    sidebar badges, All Topics section counts, version tag
+        saveToDB();
+        closeModal();
+        renderAll();
+        toast('✓ "' + topicName + '" deleted from all views');
       }
     });
   }
