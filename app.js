@@ -563,7 +563,9 @@ const App = (() => {
 
   // ── ACTIONS ───────────────────────────────────────────────────────────────
   function toggleSidebar() {
-    if (window.innerWidth <= 700) {
+    // Use matchMedia for reliable breakpoint detection on Firefox Android
+    const isMobile = window.matchMedia('(max-width: 700px)').matches;
+    if (isMobile) {
       document.body.classList.toggle('sidebar-open');
     } else {
       document.body.classList.toggle('sidebar-closed');
